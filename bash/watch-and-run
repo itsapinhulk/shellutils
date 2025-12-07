@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+
+export DATESTR_FORMAT="%Y-%m-%d %H:%M:%S"
+function datestr() {
+  date +"${DATESTR_FORMAT}"
+}
+
+watch_and_run() {
+  if ! command -v fswatch &> /dev/null; then
+    echo "Usage: need to have command 'fswatch' to run the $0 command"
+    return 1
+  fi
+
+  if [ "$#" -lt 2 ]; then
+    echo "Usage: watch_and_run <file1> [file2 ...] -- <command>"
+    return 1
+  fi
+
+  # Split arguments into files and command
+  files=()
+  while [[ "$1" != "--" ]]; do
+    files+=("$1")
+    shift
+    if [ $# -eq 0 ]; then
+      echo "Error: missing -- separator before command"
+      return 1
+    fi
+  done
+  shift # remove the --
+
+  cmd="$*"
+  if [[ "$#" -lt 1 ]]; then
+    echo "Error: Missing command after -- separator"
+    return 1
+  fi
+
+  clear
+  echo "Watching files: ${files[*]}"
+  echo "Command: $cmd"
+  echo "Press Ctrl-C to stop."
+  echo "-----------------"
+
+  eval "$cmd"
+
+  new_batch=1
+  last_command=$(datestr)
+
+  # Only look for file updates, and process in batches to avoid running multiple times back-to-back
+  # fswatch uses NoOp as batch marker
+  fswatch --event-flags --recursive --batch-marker --event Updated --timestamp --format-time "${DATESTR_FORMAT}" "${files[@]}" | while read -r event; do
+    if [[ "${event}" == "NoOp" ]]; then
+        # Start of new batch of changes
+        new_batch=1
+        continue
+    fi
+
+    curr_time=$(datestr)
+
+    event_arr=($event)
+    event_time="${event_arr[0]} ${event_arr[1]}"
+    event_file="${event_arr[2]}"
+
+    if command -v gdate &> /dev/null; then
+        # On macOS, use date from coreutils
+        last_command_timestamp=$(gdate -d "$last_command" +%s)
+        event_timestamp=$(gdate -d "$event_time" +%s)
+    else
+        last_command_timestamp=$(date -d "$last_command" +%s)
+        event_timestamp=$(date -d "$event_time" +%s)
+    fi
+
+    if (( new_batch )); then
+      # If the event happened before the completion of the previous command, skip it
+      if (( event_timestamp > last_command_timestamp )); then
+        clear
+        echo "--- Change detected at" ${curr_time} "for" ${event_file} "---"
+        eval "$cmd"
+        last_command=$(datestr)
+        new_batch=0
+      fi
+    fi
+
+  done
+}
+
+watch_and_run "$@"

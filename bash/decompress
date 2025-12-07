@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+
+function decompress() {
+  if [[ "$#" -ne 1 ]]; then
+    echo "Usage: decompress <file>"
+    return 1
+  fi
+
+  local _full_file_path="$1"
+  local _file_name="$(basename ${_full_file_path})"
+
+  if [[ ${_file_name} =~ .*\.tar$ ]]; then
+    local _dir_name=$(echo "${_file_name}" | sed 's/\.tar$//')
+    (
+      set -x;
+      mkdir "${_dir_name}"
+      tar -xvf "${_full_file_path}" -C "${_dir_name}"
+    )
+  elif [[ ${_file_name} =~ .*\.tar\.gz$ ]]; then
+    local _dir_name=$(echo "${_file_name}" | sed 's/\.tar\.gz$//')
+    (
+      set -x;
+      mkdir "${_dir_name}"
+      tar -xvzf "${_full_file_path}" -C "${_dir_name}"
+    )
+  elif [[ ${_file_name} =~ .*\.tar\.bz2$ ]]; then
+    local _dir_name=$(echo "${_file_name}" | sed 's/\.tar\.bz2$//')
+    (
+      set -x;
+      mkdir "${_dir_name}"
+      tar -xvjf "${_full_file_path}" -C "${_dir_name}"
+    )
+  elif [[ ${_file_name} =~ .*\.zip$ ]]; then
+    local _dir_name=$(echo "${_file_name}" | sed 's/\.zip$//')
+    (
+      set -x;
+      mkdir "${_dir_name}"
+      unzip "${_full_file_path}" -d "${_dir_name}"
+    )
+  else
+    echo "Unsupported file extension - '${_file_name}'"
+    return 1
+  fi
+}
+
+decompress "$@"

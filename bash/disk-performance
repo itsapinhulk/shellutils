@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+
+# Test performance of disk backing current folder, no idea how accurate this methodology is
+function disk_performance() {
+    local _file_size=256kB
+
+    if [[ $# == 1 ]]; then
+        _file_size=$1
+    fi
+
+    local _count=2k
+    if [[ $# == 2 ]]; then
+        _count=$2
+    fi
+
+    filename=./disk_perf.$RANDOM.out
+
+    echo "Running with ${_file_size}, ${_count} times"
+    dd if=/dev/zero of="$filename" conv=fdatasync bs=${_file_size} count=${_count};
+    rm -f "$filename"
+}
+
+disk_performance "$@"
