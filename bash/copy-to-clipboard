@@ -1,0 +1,24 @@
+#!/bin/env bash
+
+ if [[ -z "$1" ]]; then
+    echo "Usage: $0 <filename>" >&2
+    exit 1
+fi
+
+if [[ ! -f "$1" ]]; then
+    echo "File not found: $1" >&2
+    exit 1
+fi
+
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    cat "$1" | pbcopy
+elif command -v xclip &> /dev/null; then
+    cat "$1" | xclip -selection clipboard
+elif command -v xsel &> /dev/null; then
+    cat "$1" | xsel --clipboard
+elif command -v wl-copy &> /dev/null; then
+    cat "$1" | wl-copy
+else
+    echo "No clipboard utility found. Install xclip, xsel, or wl-clipboard" >&2
+    exit 1
+fi
