@@ -100,8 +100,9 @@ def load_records(filepath: str) -> list[dict]:
 
 
 def extract_fields(record: dict, fields: list[str] | None, timestamp_fields: set[str],
-                   date_fmt: str) -> dict:
-    """Extract specified fields from a record. If fields is None, extract all."""
+                   date_fmt: str) -> dict | None:
+    """Extract specified fields from a record. If fields is None, extract all.
+    Returns None if any requested field does not exist."""
     if fields is None:
         # Show all fields
         result = {}
@@ -114,6 +115,8 @@ def extract_fields(record: dict, fields: list[str] | None, timestamp_fields: set
     result = {}
     for field in fields:
         value = get_nested_value(record, field)
+        if value is None:
+            return None  # Field doesn't exist, filter out this record
         if field in timestamp_fields and isinstance(value, (int, float)):
             value = convert_timestamp(value, date_fmt)
         result[field] = value
@@ -180,8 +183,11 @@ Examples:
             pass  # Skip sorting if values aren't comparable
 
     # Extract fields
-    results = [extract_fields(r, args.fields, timestamp_fields, args.date_format)
-               for r in filtered]
+    results = []
+    for r in filtered:
+        extracted = extract_fields(r, args.fields, timestamp_fields, args.date_format)
+        if extracted is not None:
+            results.append(extracted)
 
     # Determine field list for output
     if args.fields is None and results:
