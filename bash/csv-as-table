@@ -1,0 +1,11 @@
+#!/bin/env bash
+
+# Read CSV from argument (file) or stdin
+if [[ -n "$1" ]] && [[ -f "$1" ]]; then
+    input=$(cat "$1")
+else
+    input=$(cat)
+fi
+
+# Convert CSV to table using column command
+echo "$input" | column -t -s ','
