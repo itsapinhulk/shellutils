@@ -1,0 +1,234 @@
+#!/bin/env python3
+"""
+Extract and display selected fields from JSON array or JSONL files.
+Supports timestamp conversion and filtering.
+"""
+
+import argparse
+import json
+import sys
+import datetime
+
+from typing import Any
+
+
+def parse_filter(filter_str: str) -> tuple[str, str, str]:
+    """Parse a filter string like 'field=value' or 'field!=value'."""
+    for op in ['!=', '>=', '<=', '~=', '>', '<', '=']:
+        if op in filter_str:
+            parts = filter_str.split(op, 1)
+            return parts[0].strip(), op, parts[1].strip()
+    raise ValueError(f"Invalid filter format: {filter_str}")
+
+
+def get_nested_value(obj: dict, key: str) -> Any:
+    """Get a value from a nested dict using dot notation (e.g., 'user.name')."""
+    keys = key.split('.')
+    val = obj
+    for k in keys:
+        if isinstance(val, dict) and k in val:
+            val = val[k]
+        else:
+            return None
+    return val
+
+
+def convert_timestamp(value: float, fmt: str = "%Y-%m-%d %H:%M:%S") -> str:
+    """Convert Unix timestamp to human-readable date in local time."""
+    try:
+        return datetime.datetime.fromtimestamp(value).strftime(fmt)
+    except (ValueError, TypeError, OSError):
+        return str(value)
+
+
+def matches_filter(record: dict, field: str, op: str, value: str) -> bool:
+    """Check if a record matches a filter condition."""
+    actual = get_nested_value(record, field)
+    if actual is None:
+        return False
+
+    try:
+        if isinstance(actual, (int, float)):
+            value = float(value)
+        elif isinstance(actual, bool):
+            value = value.lower() in ('true', '1', 'yes')
+    except ValueError:
+        pass
+
+    if op == '=':
+        return str(actual) == str(value)
+    elif op == '!=':
+        return str(actual) != str(value)
+    elif op == '~=':
+        return str(value) in str(actual)
+    elif op == '>':
+        return actual > value
+    elif op == '<':
+        return actual < value
+    elif op == '>=':
+        return actual >= value
+    elif op == '<=':
+        return actual <= value
+    return False
+
+
+def load_records(filepath: str) -> list[dict]:
+    """Load records from JSON array or JSONL file."""
+    records = []
+    with open(filepath, 'r', encoding='utf-8') as f:
+        content = f.read().strip()
+
+    # Try JSON array first
+    try:
+        data = json.loads(content)
+        if isinstance(data, list):
+            return data
+        return [data]
+    except json.JSONDecodeError:
+        pass
+
+    # Try JSONL
+    for line in content.splitlines():
+        line = line.strip()
+        if line:
+            try:
+                records.append(json.loads(line))
+            except json.JSONDecodeError as e:
+                print(f"Warning: Skipping invalid JSON line: {e}", file=sys.stderr)
+
+    return records
+
+
+def extract_fields(record: dict, fields: list[str] | None, timestamp_fields: set[str],
+                   date_fmt: str) -> dict:
+    """Extract specified fields from a record. If fields is None, extract all."""
+    if fields is None:
+        # Show all fields
+        result = {}
+        for field, value in record.items():
+            if field in timestamp_fields and isinstance(value, (int, float)):
+                value = convert_timestamp(value, date_fmt)
+            result[field] = value
+        return result
+
+    result = {}
+    for field in fields:
+        value = get_nested_value(record, field)
+        if field in timestamp_fields and isinstance(value, (int, float)):
+            value = convert_timestamp(value, date_fmt)
+        result[field] = value
+    return result
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description='Extract fields from JSON array or JSONL files',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  %(prog)s data.json -f name email status
+  %(prog)s logs.jsonl -f user.name timestamp -t timestamp
+  %(prog)s data.json -f id name -F status=active -F age>=18
+  %(prog)s events.json -f event_type created_at -t created_at --date-format "%%Y-%%m-%%d"
+        """
+    )
+    parser.add_argument('file', help='Input JSON or JSONL file')
+    parser.add_argument('-f', '--fields', nargs='+', required=False, default=None,
+                        help='Fields to extract (supports dot notation for nested fields). If omitted, shows all fields.')
+    parser.add_argument('-t', '--timestamp-fields', nargs='*', default=None,
+                        help='Fields to convert from Unix timestamp to date')
+    parser.add_argument('-s', '--sort', nargs='*', default=None,
+                        help='Fields to sort by (applied successively)')
+    parser.add_argument('-r', '--reverse', action='store_true',
+                        help='Reverse sort order (descending)')
+    parser.add_argument('-l', '--filter', action='append', dest='filters', default=None,
+                        help='Filter records (e.g., status=active, name~=john, age>=18). If omitted, shows all records.')
+    parser.add_argument('--date-format', default='%Y-%m-%d %H:%M:%S',
+                        help='Output format for timestamps (default: %%Y-%%m-%%d %%H:%%M:%%S)')
+    parser.add_argument('-o', '--output', choices=['json', 'jsonl', 'table', 'csv'],
+                        default='jsonl', help='Output format (default: jsonl)')
+    parser.add_argument('--no-header', action='store_true',
+                        help='Omit header row in table/csv output')
+
+    args = parser.parse_args()
+
+    timestamp_fields = set(args.timestamp_fields) if args.timestamp_fields else set()
+    parsed_filters = [parse_filter(f) for f in args.filters] if args.filters else []
+
+    try:
+        records = load_records(args.file)
+    except FileNotFoundError:
+        print(f"Error: File not found: {args.file}", file=sys.stderr)
+        sys.exit(1)
+    except Exception as e:
+        print(f"Error reading file: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    # Filter records
+    filtered = []
+    for record in records:
+        if all(matches_filter(record, f, op, v) for f, op, v in parsed_filters):
+            filtered.append(record)
+
+    # Sort records
+    if filtered and args.sort:
+        try:
+            # Sort by multiple fields successively (stable sort)
+            filtered.sort(key=lambda r: tuple(get_nested_value(r, field) or 0 for field in args.sort),
+                         reverse=args.reverse)
+        except (TypeError, ValueError):
+            pass  # Skip sorting if values aren't comparable
+
+    # Extract fields
+    results = [extract_fields(r, args.fields, timestamp_fields, args.date_format)
+               for r in filtered]
+
+    # Determine field list for output
+    if args.fields is None and results:
+        # Use keys from first result
+        field_list = list(results[0].keys())
+    else:
+        field_list = args.fields if args.fields else []
+
+    # Output
+    if args.output == 'json':
+        print(json.dumps(results, indent=2, default=str))
+    elif args.output == 'jsonl':
+        for r in results:
+            print(json.dumps(r, default=str))
+    elif args.output == 'csv':
+        import csv
+        writer = csv.writer(sys.stdout)
+        if not args.no_header and field_list:
+            writer.writerow(field_list)
+        for r in results:
+            writer.writerow([r.get(f, '') for f in field_list])
+    else:  # table
+        if not results:
+            print("No matching records found.")
+            return
+
+        col_widths = {f: len(f) for f in field_list}
+        for r in results:
+            for f in field_list:
+                col_widths[f] = max(col_widths[f], len(str(r.get(f, ''))))
+
+        def print_row(values):
+            print(' | '.join(str(v).ljust(col_widths[f]) for f, v in zip(field_list, values)))
+
+        if not args.no_header:
+            print_row(field_list)
+            print('-+-'.join('-' * col_widths[f] for f in field_list))
+
+        for r in results:
+            print_row([r.get(f, '') for f in field_list])
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except BrokenPipeError:
+        # Handle pipe closure gracefully (e.g., when piping to head)
+        sys.stderr.close()
+    except KeyboardInterrupt:
+        sys.exit(1)
