@@ -1,0 +1,31 @@
+#!/bin/env bash
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+
+# Parse arguments - optional filename before --, command after --
+INPUT_FILE=""
+FILTER_CMD=()
+while [[ $# -gt 0 ]]; do
+  if [[ "$1" == "--" ]]; then
+    shift
+    FILTER_CMD=("$@")
+    break
+  fi
+  INPUT_FILE="$1"
+  shift
+done
+
+# Error if no command was provided
+if [[ ${#FILTER_CMD[@]} -eq 0 ]]; then
+  echo "Error: No filter command provided" >&2
+  echo "Usage: filter-csv-with-headers [file] -- <command>" >&2
+  echo "       cat file.csv | filter-csv-with-headers -- <command>" >&2
+  exit 1
+fi
+
+# Run the filter with headers preserved
+# Read header first, then pipe the rest through the filter command
+{
+  IFS= read -r header
+  printf '%s\n' "$header"
+  "${FILTER_CMD[@]}"
+} < "${INPUT_FILE:-/dev/stdin}" | "${SCRIPT_DIR}/csv-as-table"
