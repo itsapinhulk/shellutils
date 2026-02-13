@@ -1,0 +1,28 @@
+#!/bin/env bash
+
+# Check if input is provided
+if [ -z "$1" ]; then
+    echo "Error: No binary path provided" >&2
+    echo "Usage: $0 /path/to/binary" >&2
+    exit 1
+fi
+
+binary="$1"
+
+# Check if file exists
+if [ ! -f "$binary" ]; then
+    echo "Error: File '$binary' not found" >&2
+    exit 1
+fi
+
+# Detect OS and use appropriate tool
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    # macOS
+    otool -l "$binary" | grep -A 2 LC_RPATH
+elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
+    # Linux - check for both RPATH and RUNPATH
+    objdump -x "$binary" | grep -iE 'rpath|runpath'
+else
+    echo "Error: Unsupported OS: $OSTYPE" >&2
+    exit 1
+fi
