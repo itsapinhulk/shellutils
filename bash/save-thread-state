@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+usage() {
+  echo "Usage: $0 [--lldb | --gdb] -p <pid> -o <output_file>"
+  echo ""
+  echo "Options:"
+  echo "  -o <output_file>   File to write backtraces to (required)"
+  echo "  -p <pid>           Attach to a running process by PID"
+  echo "  --lldb             Use lldb instead of gdb"
+  echo "  --gdb         Use gdb"
+  exit 1
+}
+
+DEBUGGER="gdb"
+[[ "$(uname)" == "Darwin" ]] && DEBUGGER="lldb"
+PID=""
+OUTPUT=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --lldb) DEBUGGER="lldb"; shift ;;
+    --gdb) DEBUGGER="gdb"; shift ;;
+    -p) PID="$2"; shift 2 ;;
+    -o) OUTPUT="$2"; shift 2 ;;
+    *) echo "Unknown option: $1"; usage ;;
+  esac
+done
+
+# Validate output
+[[ -z "$OUTPUT" ]] && { echo "Error: -o <output_file> is required."; usage; }
+
+# Validate target
+if [[ -z "$PID" ]]; then
+  echo "Error: Must specify -p <pid>."
+  usage
+fi
+
+# Note: sudo will have its own PATH. To ensure we are using the right gdb/lldb we use the full path
+
+run_gdb() {
+  local args=(
+    -batch -q
+    -ex "set pagination off"
+    -ex "set confirm off"
+    -ex "set logging overwrite on"
+    -ex "set logging file $OUTPUT"
+    -ex "set logging enabled on"
+    -ex "thread apply all bt"
+    -ex "set logging enabled off"
+    -ex "quit"
+  )
+
+
+
+  if [[ -n "$PID" ]]; then
+    sudo `which gdb` "${args[@]}" -p "$PID"
+  fi
+}
+
+run_lldb() {
+  local cmds="thread backtrace all"
+
+  if [[ -n "$PID" ]]; then
+    sudo `which lldb` -p "$PID" --batch -o "$cmds" -o "quit" > "$OUTPUT" 2>&1
+  fi
+}
+
+echo "Using $DEBUGGER — writing backtraces to '$OUTPUT'..."
+
+if [[ "$DEBUGGER" == "lldb" ]]; then
+  run_lldb
+else
+  run_gdb
+fi
+
+echo "Done. Output written to '$OUTPUT'."
