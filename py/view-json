@@ -1,4 +1,4 @@
-#!/bin/env python3
+#!/usr/bin/env python3
 """
 Extract and display selected fields from JSON array or JSONL files.
 Supports timestamp conversion and filtering.

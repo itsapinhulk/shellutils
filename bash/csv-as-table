@@ -1,4 +1,4 @@
-#!/bin/env bash
+#!/usr/bin/env bash
 
 # Read CSV from argument (file) or stdin
 if [[ -n "$1" ]] && [[ -f "$1" ]]; then
