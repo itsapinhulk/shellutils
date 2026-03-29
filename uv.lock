@@ -3,7 +3,7 @@ revision = 3
 requires-python = ">=3.14"
 
 [options]
-exclude-newer = "2026-03-19T03:38:18.673954317Z"
+exclude-newer = "2026-03-19T04:01:38.711236901Z"
 exclude-newer-span = "P10D"
 
 [[package]]
@@ -69,7 +69,7 @@ wheels = [
 
 [[package]]
 name = "shellutils"
-version = "0.1.0"
+version = "1.0"
 source = { virtual = "." }
 
 [package.dev-dependencies]
