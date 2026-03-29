@@ -1,0 +1,20 @@
+{
+  "name": "Shellutils Dev Environment",
+  "runArgs": ["--hostname", "devct-shellutils"],
+  "image": "ghcr.io/itsapinhulk/devcontainer:latest",
+  "workspaceFolder": "/repo/itsapinhulk/shellutils",
+  "workspaceMount": "source=${localWorkspaceFolder},target=${containerWorkspaceFolder},type=bind",
+  "remoteUser": "devuser",
+  "containerUser": "devuser",
+  // Ensures the container workspace folder is owned by your user
+  "updateRemoteUserUID": true,
+  // Shared claude code settings, and hidden jj directory
+  "mounts": [
+    "source=claude-code-config,target=/home/devuser/.claude,type=volume",
+    "type=volume,target=${containerWorkspaceFolder}/.jj",
+  ],
+  "containerEnv": {
+    "CLAUDE_CONFIG_DIR": "/home/devuser/.claude",
+  },
+  "updateContentCommand": "sudo chown -R devuser:devuser ${containerWorkspaceFolder} || true",
+}
