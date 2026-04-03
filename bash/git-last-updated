@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# Print the Unix timestamp of the last git commit that touched a path.
+
+set -euo pipefail
+
+usage() {
+    echo "Usage: $(basename "$0") [-C <git-dir>] [-H | -u] <path>" >&2
+    echo "  -C  Run git in this directory (default: current directory)" >&2
+    echo "  -H  Output in human-readable format with local timezone" >&2
+    echo "  -u  Output in human-readable format in UTC" >&2
+    exit 1
+}
+
+git_dir=""
+format="unix"
+
+while getopts "C:Huh" opt; do
+    case "$opt" in
+        C) git_dir="$OPTARG" ;;
+        H) format="human" ;;
+        u) format="utc" ;;
+        *) usage ;;
+    esac
+done
+shift $((OPTIND - 1))
+
+[[ $# -eq 1 ]] || usage
+
+path="$1"
+git_args=()
+[[ -n "$git_dir" ]] && git_args+=(-C "$git_dir")
+
+ts=$(git "${git_args[@]}" log -1 --format="%ct" -- "$path")
+
+if [[ -z "$ts" ]]; then
+    echo "Error: no git history found for: $path" >&2
+    exit 1
+fi
+
+case "$format" in
+    human) date -d "@$ts" ;;
+    utc)   date -u -d "@$ts" ;;
+    *)     echo "$ts" ;;
+esac
