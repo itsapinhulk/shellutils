@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# Pull the latest commit for every submodule.
+set -euo pipefail
+
+TARGET="${1:-.}"
+
+# If set, colon-separated list of submodule paths to process; otherwise process all.
+GIT_SUBMODULES_UPGRADE_TARGET="${GIT_SUBMODULES_UPGRADE_TARGET:-}"
+# Colon-separated list of submodule paths to skip (e.g. ext/foo:ext/bar)
+GIT_SUBMODULES_UPGRADE_SKIP="${GIT_SUBMODULES_UPGRADE_SKIP:-}"
+export GIT_SUBMODULES_UPGRADE_TARGET GIT_SUBMODULES_UPGRADE_SKIP
+
+_sync_submodule() {
+    local IFS=':'
+    if [ -n "$GIT_SUBMODULES_UPGRADE_TARGET" ]; then
+        local _target _matched=0
+        for _target in ${GIT_SUBMODULES_UPGRADE_TARGET}; do
+            if [ "$displaypath" = "$_target" ]; then
+                _matched=1
+                break
+            fi
+        done
+        if [ "$_matched" = 0 ]; then
+            return
+        fi
+    fi
+
+    local _skip
+    for _skip in ${GIT_SUBMODULES_UPGRADE_SKIP}; do
+        if [ "$displaypath" = "$_skip" ]; then
+            echo "Skipping $displaypath"
+            return
+        fi
+    done
+
+    echo "Syncing $displaypath..."
+    git fetch origin
+    if git symbolic-ref HEAD >/dev/null 2>&1; then
+        git merge --ff-only FETCH_HEAD
+    else
+        git checkout FETCH_HEAD
+    fi
+}
+export -f _sync_submodule
+
+git -C "$TARGET" submodule foreach \
+  "$(declare -f _sync_submodule); _sync_submodule"

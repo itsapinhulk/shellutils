@@ -1,0 +1,43 @@
+#!/usr/bin/env python3
+"""Replace Claude settings.json permissions->allow with a broad set of allowed commands."""
+
+import json
+import sys
+from pathlib import Path
+
+BROAD_ALLOW = [
+    "Bash(npm run *)",
+    "Bash(git *)",
+    "Bash(npx *)",
+    "Bash(ls *)",
+    "Bash(cat *)",
+    "Bash(find *)",
+    "Bash(grep *)",
+    "Bash(python *)",
+    "Bash(python3 *)",
+    "Bash(pytest *)",
+    "Bash(sh *)",
+    "Bash(bash *)",
+    "Bash(./*.sh)",
+    "Bash(*.sh)",
+]
+
+DEFAULT_SETTINGS_PATH = Path.home() / ".claude" / "settings.json"
+
+
+def apply_broad_permissions(settings_path: Path) -> dict:
+    text = settings_path.read_text() if settings_path.exists() else ""
+    settings = json.loads(text) if text.strip() else {}
+    settings.setdefault("permissions", {})["allow"] = BROAD_ALLOW
+    settings.setdefault("permissions", {})["defaultMode"] = "acceptEdits"
+    return settings
+
+
+def main():
+    path = Path(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_SETTINGS_PATH
+    updated = apply_broad_permissions(path)
+    print(json.dumps(updated, indent=2))
+
+
+if __name__ == "__main__":
+    main()
