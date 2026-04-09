@@ -4,6 +4,8 @@ Extract and display selected fields from JSON array or JSONL files.
 Supports timestamp conversion and filtering.
 """
 
+from __future__ import annotations
+
 import argparse
 import json
 import sys
