@@ -20,6 +20,7 @@ convert_timestamp = view_json.convert_timestamp
 matches_filter = view_json.matches_filter
 load_records = view_json.load_records
 extract_fields = view_json.extract_fields
+main = view_json.main
 
 
 # --- parse_filter ---
@@ -207,3 +208,81 @@ class TestExtractFields:
         record = {"user": {"name": "Alice"}, "id": 1}
         result = extract_fields(record, ["user.name"], set(), "%Y-%m-%d %H:%M:%S")
         assert result == {"user.name": "Alice"}
+
+
+# --- multi-file and file label ---
+
+class TestMultiFileAndLabel:
+    def test_single_file_no_label(self, tmp_path, capsys):
+        f = tmp_path / "a.json"
+        f.write_text(json.dumps([{"id": 1}]))
+        import sys
+        argv_backup = sys.argv
+        try:
+            sys.argv = ["view-json", str(f)]
+            main()
+        finally:
+            sys.argv = argv_backup
+        out = capsys.readouterr().out
+        assert "# " not in out
+
+    def test_no_file_label_suppresses_label(self, tmp_path, capsys):
+        f1 = tmp_path / "a.json"
+        f2 = tmp_path / "b.json"
+        f1.write_text(json.dumps([{"id": 1}]))
+        f2.write_text(json.dumps([{"id": 2}]))
+        import sys
+        argv_backup = sys.argv
+        try:
+            sys.argv = ["view-json", str(f1), str(f2), "--no-file-label"]
+            main()
+        finally:
+            sys.argv = argv_backup
+        out = capsys.readouterr().out
+        assert "# " not in out
+
+    def test_multiple_files_processed_in_order(self, tmp_path, capsys):
+        f1 = tmp_path / "a.json"
+        f2 = tmp_path / "b.json"
+        f1.write_text(json.dumps([{"id": 1}]))
+        f2.write_text(json.dumps([{"id": 2}]))
+        import sys
+        argv_backup = sys.argv
+        try:
+            sys.argv = ["view-json", str(f1), str(f2), "--no-file-label"]
+            main()
+        finally:
+            sys.argv = argv_backup
+        out = capsys.readouterr().out
+        lines = [l for l in out.splitlines() if l.strip()]
+        assert json.loads(lines[0]) == {"id": 1}
+        assert json.loads(lines[1]) == {"id": 2}
+
+    def test_with_file_label_shows_label_for_single_file(self, tmp_path, capsys):
+        f = tmp_path / "a.json"
+        f.write_text(json.dumps([{"id": 1}]))
+        import sys
+        argv_backup = sys.argv
+        try:
+            sys.argv = ["view-json", str(f), "--with-file-label"]
+            main()
+        finally:
+            sys.argv = argv_backup
+        out = capsys.readouterr().out
+        assert f"# {f}" in out
+
+    def test_multiple_files_each_get_label(self, tmp_path, capsys):
+        f1 = tmp_path / "a.json"
+        f2 = tmp_path / "b.json"
+        f1.write_text(json.dumps([{"id": 1}]))
+        f2.write_text(json.dumps([{"id": 2}]))
+        import sys
+        argv_backup = sys.argv
+        try:
+            sys.argv = ["view-json", str(f1), str(f2)]
+            main()
+        finally:
+            sys.argv = argv_backup
+        out = capsys.readouterr().out
+        assert f"# {f1}" in out
+        assert f"# {f2}" in out

@@ -133,9 +133,11 @@ Examples:
   %(prog)s logs.jsonl -f user.name timestamp -t timestamp
   %(prog)s data.json -f id name -F status=active -F age>=18
   %(prog)s events.json -f event_type created_at -t created_at --date-format "%%Y-%%m-%%d"
+  %(prog)s a.json b.json c.json -f id name
+  %(prog)s a.json b.json --no-file-label -f id name
         """
     )
-    parser.add_argument('file', help='Input JSON or JSONL file')
+    parser.add_argument('files', nargs='+', help='Input JSON or JSONL file(s)')
     parser.add_argument('-f', '--fields', nargs='+', required=False, default=None,
                         help='Fields to extract (supports dot notation for nested fields). If omitted, shows all fields.')
     parser.add_argument('-t', '--timestamp-fields', nargs='*', default=None,
@@ -152,82 +154,90 @@ Examples:
                         default='jsonl', help='Output format (default: jsonl)')
     parser.add_argument('--no-header', action='store_true',
                         help='Omit header row in table/csv output')
+    parser.add_argument('--no-file-label', action='store_true',
+                        help='Omit the file name label printed before each file\'s output')
+    parser.add_argument('--with-file-label', action='store_true',
+                        help='Always show the file name label, even for a single file')
 
     args = parser.parse_args()
 
     timestamp_fields = set(args.timestamp_fields) if args.timestamp_fields else set()
     parsed_filters = [parse_filter(f) for f in args.filters] if args.filters else []
 
-    try:
-        records = load_records(args.file)
-    except FileNotFoundError:
-        print(f"Error: File not found: {args.file}", file=sys.stderr)
-        sys.exit(1)
-    except Exception as e:
-        print(f"Error reading file: {e}", file=sys.stderr)
-        sys.exit(1)
+    for filepath in args.files:
+        if (len(args.files) > 1 or args.with_file_label) and not args.no_file_label:
+            print(f"# {filepath}")
 
-    # Filter records
-    filtered = []
-    for record in records:
-        if all(matches_filter(record, f, op, v) for f, op, v in parsed_filters):
-            filtered.append(record)
-
-    # Sort records
-    if filtered and args.sort:
         try:
-            # Sort by multiple fields successively (stable sort)
-            filtered.sort(key=lambda r: tuple(get_nested_value(r, field) or 0 for field in args.sort),
-                         reverse=args.reverse)
-        except (TypeError, ValueError):
-            pass  # Skip sorting if values aren't comparable
+            records = load_records(filepath)
+        except FileNotFoundError:
+            print(f"Error: File not found: {filepath}", file=sys.stderr)
+            sys.exit(1)
+        except Exception as e:
+            print(f"Error reading file: {e}", file=sys.stderr)
+            sys.exit(1)
 
-    # Extract fields
-    results = []
-    for r in filtered:
-        extracted = extract_fields(r, args.fields, timestamp_fields, args.date_format)
-        if extracted is not None:
-            results.append(extracted)
+        # Filter records
+        filtered = []
+        for record in records:
+            if all(matches_filter(record, f, op, v) for f, op, v in parsed_filters):
+                filtered.append(record)
 
-    # Determine field list for output
-    if args.fields is None and results:
-        # Use keys from first result
-        field_list = list(results[0].keys())
-    else:
-        field_list = args.fields if args.fields else []
+        # Sort records
+        if filtered and args.sort:
+            try:
+                # Sort by multiple fields successively (stable sort)
+                filtered.sort(key=lambda r: tuple(get_nested_value(r, field) or 0 for field in args.sort),
+                             reverse=args.reverse)
+            except (TypeError, ValueError):
+                pass  # Skip sorting if values aren't comparable
 
-    # Output
-    if args.output == 'json':
-        print(json.dumps(results, indent=2, default=str))
-    elif args.output == 'jsonl':
-        for r in results:
-            print(json.dumps(r, default=str))
-    elif args.output == 'csv':
-        import csv
-        writer = csv.writer(sys.stdout)
-        if not args.no_header and field_list:
-            writer.writerow(field_list)
-        for r in results:
-            writer.writerow([r.get(f, '') for f in field_list])
-    else:  # table
-        if not results:
-            print("No matching records found.")
-            return
+        # Extract fields
+        results = []
+        for r in filtered:
+            extracted = extract_fields(r, args.fields, timestamp_fields, args.date_format)
+            if extracted is not None:
+                results.append(extracted)
 
-        col_widths = {f: len(f) for f in field_list}
-        for r in results:
-            for f in field_list:
-                col_widths[f] = max(col_widths[f], len(str(r.get(f, ''))))
+        # Determine field list for output
+        if args.fields is None and results:
+            # Use keys from first result
+            field_list = list(results[0].keys())
+        else:
+            field_list = args.fields if args.fields else []
 
-        def print_row(values):
-            print(' | '.join(str(v).ljust(col_widths[f]) for f, v in zip(field_list, values)))
+        # Output
+        if args.output == 'json':
+            print(json.dumps(results, indent=2, default=str))
+        elif args.output == 'jsonl':
+            for r in results:
+                print(json.dumps(r, default=str))
+        elif args.output == 'csv':
+            import csv
+            writer = csv.writer(sys.stdout)
+            if not args.no_header and field_list:
+                writer.writerow(field_list)
+            for r in results:
+                writer.writerow([r.get(f, '') for f in field_list])
+        else:  # table
+            if not results:
+                print("No matching records found.")
+                continue
 
-        if not args.no_header:
-            print_row(field_list)
-            print('-+-'.join('-' * col_widths[f] for f in field_list))
+            col_widths = {f: len(f) for f in field_list}
+            for r in results:
+                for f in field_list:
+                    col_widths[f] = max(col_widths[f], len(str(r.get(f, ''))))
 
-        for r in results:
-            print_row([r.get(f, '') for f in field_list])
+            def print_row(values):
+                print(' | '.join(str(v).ljust(col_widths[f]) for f, v in zip(field_list, values)))
+
+            if not args.no_header:
+                print_row(field_list)
+                print('-+-'.join('-' * col_widths[f] for f in field_list))
+
+            for r in results:
+                print_row([r.get(f, '') for f in field_list])
 
 
 if __name__ == '__main__':
