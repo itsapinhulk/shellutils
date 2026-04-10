@@ -17,6 +17,7 @@ BROAD_ALLOW = [
     "Bash(python3 *)",
     "Bash(pytest *)",
     "Bash(sh *)",
+    "Bash(uv run *)",
     "Bash(bash *)",
     "Bash(./*.sh)",
     "Bash(*.sh)",
