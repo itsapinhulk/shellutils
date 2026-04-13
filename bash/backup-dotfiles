@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# Wrapper for the `backup-dotfiles` Python script.
+#
+# Reads configuration from environment variables and forwards them as
+# command-line arguments, then delegates to `py/backup-dotfiles`.
+#
+# Environment variables:
+#   BACKUP_DOTFILES_SOURCES   Colon-separated list of paths to back up (required)
+#   BACKUP_DOTFILES_TARGET    Destination directory (required)
+#
+# Any additional arguments passed to this script are forwarded verbatim,
+# allowing env-var defaults to be overridden on the command line.
+#
+# By default the script performs a dry run (prints paths without writing).
+# Pass --save to actually write files.
+#
+# Output layout:
+#   ~/.bashrc       ->  <target>/_tilde_/_dot_bashrc
+#   ~/.config/nvim  ->  <target>/_tilde_/_dot_config/nvim
+#   /etc/hosts      ->  <target>/_root_/etc/hosts
+#
+# Examples:
+#   BACKUP_DOTFILES_SOURCES="~/.bashrc:~/.config/nvim:/etc/hosts" BACKUP_DOTFILES_TARGET=/mnt/backup backup-dotfiles
+#   BACKUP_DOTFILES_TARGET=/mnt/backup backup-dotfiles -s ~/.ssh ~/.zshrc /etc/fstab --save
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PY_SCRIPT="$SCRIPT_DIR/../py/backup-dotfiles.py"
+
+args=()
+
+# Build --sources from env if set and not already supplied via CLI.
+if [[ -z "${BACKUP_DOTFILES_SOURCES:-}" ]] || [[ "$*" == *"--sources"* ]] || [[ "$*" == *" -s "* ]] || [[ "$*" == *" -s"* && "$*" != *"--"* ]]; then
+    : # sources will come from CLI args
+else
+    IFS=':' read -ra source_array <<< "$BACKUP_DOTFILES_SOURCES"
+    args+=(--sources "${source_array[@]}")
+fi
+
+# Build --target from env if set and not already supplied via CLI.
+if [[ -n "${BACKUP_DOTFILES_TARGET:-}" ]] && [[ "$*" != *"--target"* ]] && [[ "$*" != *" -t "* ]]; then
+    args+=(--target "$BACKUP_DOTFILES_TARGET")
+fi
+
+exec python3 "$PY_SCRIPT" "${args[@]}" "$@"
