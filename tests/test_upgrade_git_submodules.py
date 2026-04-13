@@ -348,6 +348,53 @@ class TestUpgradeGitSubmodules(unittest.TestCase):
         self.assertEqual(_git("rev-parse", "HEAD", cwd=parent / "sub"), new_commit)
 
     # ------------------------------------------------------------------
+    # fetch origin HEAD: no rollback from older refs
+    # ------------------------------------------------------------------
+
+    def test_fetch_head_does_not_rollback_via_older_branch(self) -> None:
+        """git fetch origin HEAD avoids rolling back via an alphabetically-prior older branch.
+
+        When a submodule is in detached HEAD state, ``git fetch origin`` writes FETCH_HEAD
+        in alphabetical branch order with all entries marked not-for-merge.
+        ``git checkout FETCH_HEAD`` then resolves to the *first* SHA in the file, which
+        belongs to whichever branch name sorts earliest — not necessarily the remote's
+        default branch.  If that branch is older than the submodule's current HEAD the
+        submodule is rolled back.
+
+        ``git fetch origin HEAD`` fetches only the remote's HEAD ref, so FETCH_HEAD
+        always resolves to the default branch's latest commit.
+        """
+        parent, origins = _setup_parent_with_submodules(self.tmp)
+        origin = origins["sub"]
+        sub = parent / "sub"
+
+        # Advance origin to v2 and sync the submodule so it's no longer at the
+        # initial commit — making the initial commit a genuine rollback target.
+        _make_commit(origin, content="v2")
+        _run_script(parent)
+        at_v2 = _git("rev-parse", "HEAD", cwd=sub)
+
+        # Detach the submodule HEAD so _sync_submodule takes the
+        # `git checkout FETCH_HEAD` path (not the merge path).
+        _git("checkout", "--detach", at_v2, cwd=sub)
+
+        # Create a branch on origin whose name sorts alphabetically BEFORE 'main'
+        # and whose tip is the initial commit (behind the submodule's current HEAD).
+        # With `git fetch origin` in detached mode this branch appears first in
+        # FETCH_HEAD, so `git checkout FETCH_HEAD` would roll the submodule back.
+        initial = _git("rev-parse", "HEAD~1", cwd=origin)
+        _git("branch", "aaa-old-branch", initial, cwd=origin)
+
+        # Advance origin's default branch (HEAD) to v3.
+        v3 = _make_commit(origin, content="v3")
+
+        result = _run_script(parent)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        # Must advance to v3, not roll back to the initial commit.
+        self.assertEqual(_git("rev-parse", "HEAD", cwd=sub), v3)
+
+    # ------------------------------------------------------------------
     # Non-recursive: nested submodules are not touched
     # ------------------------------------------------------------------
 

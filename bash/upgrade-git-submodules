@@ -34,7 +34,7 @@ _sync_submodule() {
     done
 
     echo "Syncing $displaypath..."
-    git fetch origin
+    git fetch origin HEAD
     if git symbolic-ref HEAD >/dev/null 2>&1; then
         git merge --ff-only FETCH_HEAD
     else
