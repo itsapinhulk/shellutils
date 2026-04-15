@@ -6,9 +6,8 @@ import sys
 from pathlib import Path
 
 BROAD_ALLOW = [
-    "Bash(npm run *)",
+    "Bash(bun run *)",
     "Bash(git *)",
-    "Bash(npx *)",
     "Bash(ls *)",
     "Bash(cat *)",
     "Bash(find *)",
