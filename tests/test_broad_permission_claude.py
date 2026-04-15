@@ -76,8 +76,7 @@ class TestApplyBroadPermissions(unittest.TestCase):
 
     def test_broad_allow_contents(self):
         self.assertIn("Bash(git *)", BROAD_ALLOW)
-        self.assertIn("Bash(npm run *)", BROAD_ALLOW)
-        self.assertIn("Bash(npx *)", BROAD_ALLOW)
+        self.assertIn("Bash(bun run *)", BROAD_ALLOW)
         self.assertIn("Bash(ls *)", BROAD_ALLOW)
         self.assertIn("Bash(cat *)", BROAD_ALLOW)
 
