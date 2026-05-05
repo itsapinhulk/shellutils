@@ -202,9 +202,24 @@ def main() -> None:
         help="Skip verifying docker auth before pushing.",
     )
     parser.add_argument(
+        "--skip-push-confirm",
+        action="store_true",
+        help="Skip the interactive confirmation prompt before pushing.",
+    )
+    parser.add_argument(
         "--allow-uncommitted",
         action="store_true",
         help="Allow building when the git working tree has uncommitted changes.",
+    )
+    parser.add_argument(
+        "--git-sha",
+        metavar="SHA",
+        help="Override the git SHA used in the tag (default: 16-char short HEAD).",
+    )
+    parser.add_argument(
+        "--build-date",
+        metavar="YYYYMMDD-HHMM",
+        help="Override the date prefix used in the tag (default: now in UTC).",
     )
     parser.add_argument(
         "--build-arg",
@@ -220,24 +235,36 @@ def main() -> None:
     if not directory.is_dir():
         sys.exit(f"Not a directory: {directory}")
 
-    if (not args.allow_uncommitted) and git_has_uncommitted(directory):
+    if args.git_sha and not re.fullmatch(r"[0-9a-f]{7,40}", args.git_sha):
+        sys.exit(f"Invalid --git-sha {args.git_sha!r}: expected 7-40 hex chars.")
+
+    if args.build_date and not re.fullmatch(r"\d{8}-\d{4}", args.build_date):
+        sys.exit(
+            f"Invalid --build-date {args.build_date!r}: expected YYYYMMDD-HHMM."
+        )
+
+    if (not args.git_sha) and (not args.allow_uncommitted) and git_has_uncommitted(directory):
         sys.exit(
             "Git working tree has uncommitted changes. "
             "Commit or stash them, or pass --allow-uncommitted to bypass."
         )
 
-    sha = git_short_sha(directory)
-    date = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d-%H%M")
+    sha = args.git_sha or git_short_sha(directory)
+    date = args.build_date or datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d-%H%M")
     dated_tag = f"{date}-{sha}"
     print(f"Build directory : {directory}")
     print(f"Git short SHA   : {sha}")
     print(f"Image tag       : {dated_tag}")
 
-    dated_refs = [f"{url}:{dated_tag}" for url in args.registry]
-    latest_refs = [] if args.no_latest else ([f"{url}:latest" for url in args.registry])
+    def refs_for(url: str) -> list[str]:
+        out = [f"{url}:{dated_tag}"]
+        if not args.no_latest:
+            out.append(f"{url}:latest")
+        return out
+
+    all_refs = [ref for url in args.registry for ref in refs_for(url)]
 
     if args.registry:
-        # Skip if any tag containing this SHA already exists on a target registry.
         print("\nChecking remote registries for an existing tag with this SHA...")
         for url in args.registry:
             existing = sha_already_pushed(url, sha)
@@ -246,18 +273,13 @@ def main() -> None:
                 return
             print(f"  ✗ {url} (no tag containing {sha})")
 
-        # Verify auth before spending time on a build.
         if (not args.no_push) and (not args.skip_login_check):
             hosts = sorted({registry_host(url) for url in args.registry})
             verify_logged_in(hosts)
 
-    # Build.
-    tag_args: list[str] = []
-    for ref in dated_refs + latest_refs:
-        tag_args += ["--tag", ref]
-    build_arg_flags: list[str] = []
-    for ba in args.build_arg:
-        build_arg_flags += ["--build-arg", ba]
+    tag_args = [arg for ref in all_refs for arg in ("--tag", ref)]
+    build_args = [f"GIT_SHA={sha}", f"BUILD_DATE={date}", *args.build_arg]
+    build_arg_flags = [arg for ba in build_args for arg in ("--build-arg", ba)]
 
     print()
     run(["docker", "build", *tag_args, *build_arg_flags, str(directory)])
@@ -268,10 +290,25 @@ def main() -> None:
         return
 
     print()
-    for ref in dated_refs + latest_refs:
-        run(["docker", "push", ref])
+    for url in args.registry:
+        push_to_registry(url, refs_for(url), confirm=not args.skip_push_confirm)
 
     print("\nDone.")
+
+
+def push_to_registry(url: str, refs: list[str], *, confirm: bool) -> None:
+    if confirm:
+        print(f"Ready to push to {url}:")
+        for ref in refs:
+            print(f"  {ref}")
+        answer = input(f"Push to {url}? [y/N] ").strip().lower()
+        if answer not in ("y", "yes"):
+            print(f"Skipped {url}.\n")
+            return
+
+    for ref in refs:
+        run(["docker", "push", ref])
+    print()
 
 
 if __name__ == "__main__":
