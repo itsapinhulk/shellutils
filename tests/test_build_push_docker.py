@@ -232,7 +232,7 @@ class TestDockerBuild:
     def test_build_args_inject_git_sha_and_build_date(self, tmp_path):
         self._setup_repo(tmp_path)
         sha = mod.git_short_sha(tmp_path)
-        date = "20260101-1200"
+        date = "20260101-120030"
         # Tag locally so we can inspect labels.
         try:
             result = _run_cli([

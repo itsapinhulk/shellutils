@@ -218,7 +218,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--build-date",
-        metavar="YYYYMMDD-HHMM",
+        metavar="YYYYMMDD-HHMMSS",
         help="Override the date prefix used in the tag (default: now in UTC).",
     )
     parser.add_argument(
@@ -238,9 +238,9 @@ def main() -> None:
     if args.git_sha and not re.fullmatch(r"[0-9a-f]{7,40}", args.git_sha):
         sys.exit(f"Invalid --git-sha {args.git_sha!r}: expected 7-40 hex chars.")
 
-    if args.build_date and not re.fullmatch(r"\d{8}-\d{4}", args.build_date):
+    if args.build_date and not re.fullmatch(r"\d{8}-\d{6}", args.build_date):
         sys.exit(
-            f"Invalid --build-date {args.build_date!r}: expected YYYYMMDD-HHMM."
+            f"Invalid --build-date {args.build_date!r}: expected YYYYMMDD-HHMMSS."
         )
 
     if (not args.git_sha) and (not args.allow_uncommitted) and git_has_uncommitted(directory):
@@ -250,7 +250,7 @@ def main() -> None:
         )
 
     sha = args.git_sha or git_short_sha(directory)
-    date = args.build_date or datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d-%H%M")
+    date = args.build_date or datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d-%H%M%S")
     dated_tag = f"{date}-{sha}"
     print(f"Build directory : {directory}")
     print(f"Git short SHA   : {sha}")
