@@ -1,18 +1,12 @@
-"""Tests for py/view-json"""
+"""Tests for py/view-json.py and bash/view-json."""
 
-import importlib.util
-import importlib.machinery
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
 
-# Import view-json (no .py extension) by path
-_script = str(Path(__file__).parent.parent / "py" / "view-json")
-loader = importlib.machinery.SourceFileLoader("view_json", _script)
-spec = importlib.util.spec_from_loader("view_json", loader)
-view_json = importlib.util.module_from_spec(spec)
-loader.exec_module(view_json)
+view_json = __import__("view-json")
 
 parse_filter = view_json.parse_filter
 get_nested_value = view_json.get_nested_value
@@ -21,6 +15,8 @@ matches_filter = view_json.matches_filter
 load_records = view_json.load_records
 extract_fields = view_json.extract_fields
 main = view_json.main
+
+BASH_SCRIPT = Path(__file__).parent.parent / "bash" / "view-json"
 
 
 # --- parse_filter ---
@@ -307,3 +303,25 @@ class TestMultiFileAndLabel:
         out = capsys.readouterr().out
         assert f"# {f1}" in out
         assert f"# {f2}" in out
+
+
+# --- bash wrapper ---
+
+class TestBashWrapper:
+    def test_help_passthrough(self):
+        result = subprocess.run(
+            ["bash", str(BASH_SCRIPT), "--help"],
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 0
+        assert "Extract fields from JSON" in result.stdout
+
+    def test_args_forwarded_verbatim(self, tmp_path):
+        f = tmp_path / "data.json"
+        f.write_text(json.dumps([{"id": 1, "name": "alpha"}]))
+        result = subprocess.run(
+            ["bash", str(BASH_SCRIPT), str(f), "--no-file-label", "-f", "id"],
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 0, result.stderr
+        assert json.loads(result.stdout.strip()) == {"id": 1}

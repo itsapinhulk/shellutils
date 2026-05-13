@@ -1,21 +1,16 @@
-"""Tests for broad-permission-claude script."""
+"""Tests for py/broad-permission-claude.py and bash/broad-permission-claude."""
 
-import importlib.machinery
-import importlib.util
 import json
+import subprocess
 import sys
 import tempfile
-import types
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-# Load the script as a module despite having no .py extension
-_script_path = Path(__file__).resolve().parent.parent / "py" / "broad-permission-claude"
-_loader = importlib.machinery.SourceFileLoader("broad_permission_claude", str(_script_path))
-_spec = importlib.util.spec_from_loader("broad_permission_claude", _loader)
-_mod: types.ModuleType = importlib.util.module_from_spec(_spec)
-_loader.exec_module(_mod)
+_mod = __import__("broad-permission-claude")
+
+BASH_SCRIPT = Path(__file__).resolve().parent.parent / "bash" / "broad-permission-claude"
 
 apply_broad_permissions = _mod.apply_broad_permissions
 BROAD_ALLOW = _mod.BROAD_ALLOW
@@ -98,6 +93,31 @@ class TestApplyBroadPermissions(unittest.TestCase):
                     _mod.main()
                     result = json.loads(mock_out.getvalue())
         self.assertEqual(result["permissions"]["allow"], BROAD_ALLOW)
+
+
+class TestBashWrapper(unittest.TestCase):
+    def test_args_forwarded_and_output_is_valid_json(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "settings.json"
+            p.write_text(json.dumps({"permissions": {"allow": []}}))
+            result = subprocess.run(
+                ["bash", str(BASH_SCRIPT), str(p)],
+                capture_output=True, text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            parsed = json.loads(result.stdout)
+            self.assertEqual(parsed["permissions"]["allow"], BROAD_ALLOW)
+
+    def test_runs_with_default_path(self):
+        # No-args invocation must execute (path defaults to ~/.claude/settings.json).
+        # Pass an explicit path so we don't depend on the real home dir.
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "settings.json"
+            result = subprocess.run(
+                ["bash", str(BASH_SCRIPT), str(p)],
+                capture_output=True, text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
 
 
 if __name__ == "__main__":
