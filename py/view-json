@@ -7,6 +7,7 @@ Supports timestamp conversion and filtering.
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import json
 import sys
 import datetime
@@ -58,8 +59,12 @@ def matches_filter(record: dict, field: str, op: str, value: str) -> bool:
         pass
 
     if op == '=':
+        if isinstance(value, str) and any(c in value for c in '*?['):
+            return fnmatch.fnmatchcase(str(actual), value)
         return str(actual) == str(value)
     elif op == '!=':
+        if isinstance(value, str) and any(c in value for c in '*?['):
+            return not fnmatch.fnmatchcase(str(actual), value)
         return str(actual) != str(value)
     elif op == '~=':
         return str(value) in str(actual)
@@ -149,7 +154,8 @@ Examples:
     parser.add_argument('-r', '--reverse', action='store_true',
                         help='Reverse sort order (descending)')
     parser.add_argument('-l', '--filter', action='append', dest='filters', default=None,
-                        help='Filter records (e.g., status=active, name~=john, age>=18). If omitted, shows all records.')
+                        help='Filter records (e.g., status=active, name=a*b, name~=john, age>=18). '
+                             '= and != support bash-style wildcards (*, ?, [..]). If omitted, shows all records.')
     parser.add_argument('--date-format', default='%Y-%m-%d %H:%M:%S',
                         help='Output format for timestamps (default: %%Y-%%m-%%d %%H:%%M:%%S)')
     parser.add_argument('-o', '--output', choices=['json', 'jsonl', 'table', 'csv'],

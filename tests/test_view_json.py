@@ -136,6 +136,27 @@ class TestMatchesFilter:
     def test_nested_field(self):
         assert matches_filter({"user": {"role": "admin"}}, "user.role", "=", "admin")
 
+    def test_equals_wildcard_star(self):
+        assert matches_filter({"name": "alpha-beta"}, "name", "=", "a*b*")
+        assert matches_filter({"name": "ab"}, "name", "=", "a*b")
+        assert not matches_filter({"name": "alpha"}, "name", "=", "a*b")
+
+    def test_equals_wildcard_question(self):
+        assert matches_filter({"code": "a1b"}, "code", "=", "a?b")
+        assert not matches_filter({"code": "a12b"}, "code", "=", "a?b")
+
+    def test_equals_wildcard_charclass(self):
+        assert matches_filter({"v": "a1"}, "v", "=", "a[0-9]")
+        assert not matches_filter({"v": "aa"}, "v", "=", "a[0-9]")
+
+    def test_not_equals_wildcard(self):
+        assert not matches_filter({"name": "alpha-beta"}, "name", "!=", "a*b*")
+        assert matches_filter({"name": "xyz"}, "name", "!=", "a*b*")
+
+    def test_equals_no_wildcard_is_exact(self):
+        # No glob metachars => exact match, not substring
+        assert not matches_filter({"name": "Johnny"}, "name", "=", "John")
+
 
 # --- load_records ---
 
