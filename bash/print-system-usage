@@ -1,0 +1,130 @@
+#!/usr/bin/env bash
+
+# Print memory (total/used/free) and CPU usage once every N seconds, one line per update.
+# Works on Linux and macOS.
+
+set -u
+
+interval=5
+if [[ $# -ge 1 ]]; then
+    if ! [[ "$1" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+        echo "Usage: $(basename "$0") [interval_seconds]" >&2
+        exit 1
+    fi
+    interval=$1
+fi
+
+os=$(uname -s)
+
+# Format bytes as a human-readable string (MiB / GiB).
+human() {
+    awk -v b="$1" 'BEGIN {
+        split("B KiB MiB GiB TiB", u);
+        i = 1;
+        while (b >= 1024 && i < 5) { b /= 1024; i++ }
+        printf("%.2f%s", b, u[i]);
+    }'
+}
+
+# --- Linux helpers ---
+linux_mem() {
+    # Values in /proc/meminfo are in kB.
+    awk '
+        /^MemTotal:/      { total = $2 * 1024 }
+        /^MemAvailable:/  { avail = $2 * 1024 }
+        /^MemFree:/       { free  = $2 * 1024 }
+        END {
+            used = total - avail;
+            printf("%d %d %d\n", total, used, free);
+        }
+    ' /proc/meminfo
+}
+
+# Read aggregate CPU jiffies from /proc/stat.
+linux_cpu_snapshot() {
+    awk '/^cpu / {
+        idle = $5 + $6;
+        total = 0;
+        for (i = 2; i <= NF; i++) total += $i;
+        printf("%d %d\n", total, idle);
+    }' /proc/stat
+}
+
+prev_total=0
+prev_idle=0
+
+# --- macOS helpers ---
+mac_mem() {
+    local page_size total free_pages active inactive speculative wired compressed used
+    page_size=$(sysctl -n hw.pagesize)
+    total=$(sysctl -n hw.memsize)
+
+    # Parse vm_stat output (counts in pages).
+    eval "$(vm_stat | awk -F: '
+        function clean(v) { gsub(/[ .]/, "", v); return v }
+        /Pages free/                  { printf("free_pages=%s\n",   clean($2)) }
+        /Pages active/                { printf("active=%s\n",       clean($2)) }
+        /Pages inactive/              { printf("inactive=%s\n",     clean($2)) }
+        /Pages speculative/           { printf("speculative=%s\n",  clean($2)) }
+        /Pages wired down/            { printf("wired=%s\n",        clean($2)) }
+        /Pages occupied by compressor/{ printf("compressed=%s\n",   clean($2)) }
+    ')"
+
+    used=$(( (active + wired + compressed) * page_size ))
+    free=$(( (free_pages + inactive + speculative) * page_size ))
+    echo "$total $used $free"
+}
+
+mac_cpu() {
+    # `top -l 2` gives a usable sample on the second iteration; -s 1 sets sample delay.
+    top -l 2 -n 0 -s 1 2>/dev/null \
+        | awk -F'[ ,%]+' '/CPU usage/ { user=$3; sys=$5; print user + sys; line=1 } END { if (!line) print "0" }' \
+        | tail -n1
+}
+
+print_line() {
+    local ts mem_total mem_used mem_free cpu_pct
+    ts=$(date '+%Y-%m-%d %H:%M:%S')
+
+    if [[ "$os" == "Linux" ]]; then
+        read -r mem_total mem_used mem_free < <(linux_mem)
+
+        read -r cur_total cur_idle < <(linux_cpu_snapshot)
+        if (( prev_total == 0 )); then
+            cpu_pct="--"
+        else
+            local dt=$(( cur_total - prev_total ))
+            local di=$(( cur_idle  - prev_idle  ))
+            if (( dt > 0 )); then
+                cpu_pct=$(awk -v dt="$dt" -v di="$di" 'BEGIN { printf("%.1f", (dt - di) * 100.0 / dt) }')
+            else
+                cpu_pct="--"
+            fi
+        fi
+        prev_total=$cur_total
+        prev_idle=$cur_idle
+    else
+        read -r mem_total mem_used mem_free < <(mac_mem)
+        cpu_pct=$(mac_cpu)
+        [[ -z "$cpu_pct" ]] && cpu_pct="--"
+        cpu_pct=$(awk -v v="$cpu_pct" 'BEGIN { printf("%.1f", v) }')
+    fi
+
+    printf "%s  mem total=%s used=%s free=%s  cpu=%s%%\n" \
+        "$ts" \
+        "$(human "$mem_total")" \
+        "$(human "$mem_used")" \
+        "$(human "$mem_free")" \
+        "$cpu_pct"
+}
+
+# On Linux, take an initial CPU snapshot so the first printed value is meaningful.
+if [[ "$os" == "Linux" ]]; then
+    read -r prev_total prev_idle < <(linux_cpu_snapshot)
+    sleep "$interval"
+fi
+
+while true; do
+    print_line
+    sleep "$interval"
+done
