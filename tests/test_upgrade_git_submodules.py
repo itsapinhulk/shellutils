@@ -125,6 +125,37 @@ def _setup_parent_with_submodules(
     return parent, origins
 
 
+def _setup_parent_with_lfs_submodule(tmp: Path) -> tuple[Path, Path]:
+    """
+    Create a parent repo with one submodule ("sub") that tracks "asset.bin"
+    via Git LFS.
+
+    Returns (parent_path, origin_path).
+    """
+    origin = tmp / "origin_sub"
+    _init_repo(origin)
+    _git("lfs", "install", "--local", cwd=origin)
+    (origin / ".gitattributes").write_text("*.bin filter=lfs diff=lfs merge=lfs -text\n")
+    _git("add", ".gitattributes", cwd=origin)
+    (origin / "asset.bin").write_bytes(b"v1-content")
+    _git("add", "asset.bin", cwd=origin)
+    _git("commit", "-m", "add lfs asset", cwd=origin)
+
+    parent = _make_parent_repo(tmp / "parent")
+    _git("submodule", "add", str(origin), "sub", cwd=parent)
+    _git("lfs", "install", "--local", cwd=parent / "sub")
+    _git("commit", "-m", "add submodule", cwd=parent)
+    return parent, origin
+
+
+def _bump_lfs_asset(origin: Path, content: bytes = b"v2-content!!") -> str:
+    """Commit a new version of "asset.bin" to *origin* and return the new SHA."""
+    (origin / "asset.bin").write_bytes(content)
+    _git("add", "asset.bin", cwd=origin)
+    _git("commit", "-m", "update asset.bin", cwd=origin)
+    return _git("rev-parse", "HEAD", cwd=origin)
+
+
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
@@ -425,6 +456,68 @@ class TestUpgradeGitSubmodules(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         # Grandchild must remain at its original commit — not updated.
         self.assertEqual(_git("rev-parse", "HEAD", cwd=grandchild_path), before)
+
+
+# ---------------------------------------------------------------------------
+# Git LFS
+# ---------------------------------------------------------------------------
+
+class TestUpgradeGitSubmodulesLfs(unittest.TestCase):
+    """Submodules with Git LFS-tracked files must not be smudged during sync.
+
+    Smudging downloads the real LFS object into the working tree while the
+    git index still holds the pointer blob. If the clean/smudge round trip
+    isn't perfectly consistent, the file is reported as locally modified and
+    gets swept into the upgrade commit. ``GIT_LFS_SKIP_SMUDGE=1`` keeps the
+    working tree as the pointer text, matching the index, and avoids
+    downloading LFS objects the upgrade doesn't need.
+    """
+
+    def setUp(self) -> None:
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._tmpdir.name)
+
+    def tearDown(self) -> None:
+        self._tmpdir.cleanup()
+
+    def test_lfs_pointer_not_smudged_in_detached_head(self) -> None:
+        """LFS file stays a pointer after `git checkout FETCH_HEAD` (detached HEAD)."""
+        parent, origin = _setup_parent_with_lfs_submodule(self.tmp)
+        sub = parent / "sub"
+
+        _git("checkout", "--detach", "HEAD", cwd=sub)
+        new_commit = _bump_lfs_asset(origin)
+
+        result = _run_script(parent)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(_git("rev-parse", "HEAD", cwd=sub), new_commit)
+
+        content = (sub / "asset.bin").read_text()
+        self.assertTrue(
+            content.startswith("version https://git-lfs.github.com/spec/v1"),
+            f"asset.bin was smudged to real content:\n{content!r}",
+        )
+        self.assertEqual(_git("status", "--porcelain", cwd=sub), "")
+
+    def test_lfs_pointer_not_smudged_in_branch_mode(self) -> None:
+        """LFS file stays a pointer after `git merge --ff-only FETCH_HEAD` (branch mode)."""
+        parent, origin = _setup_parent_with_lfs_submodule(self.tmp)
+        sub = parent / "sub"
+
+        new_commit = _bump_lfs_asset(origin)
+
+        result = _run_script(parent)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(_git("rev-parse", "HEAD", cwd=sub), new_commit)
+
+        content = (sub / "asset.bin").read_text()
+        self.assertTrue(
+            content.startswith("version https://git-lfs.github.com/spec/v1"),
+            f"asset.bin was smudged to real content:\n{content!r}",
+        )
+        self.assertEqual(_git("status", "--porcelain", cwd=sub), "")
 
 
 if __name__ == "__main__":

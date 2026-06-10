@@ -34,11 +34,11 @@ _sync_submodule() {
     done
 
     echo "Syncing $displaypath..."
-    git fetch origin HEAD
+    GIT_LFS_SKIP_SMUDGE=1 git fetch origin HEAD
     if git symbolic-ref HEAD >/dev/null 2>&1; then
-        git merge --ff-only FETCH_HEAD
+        GIT_LFS_SKIP_SMUDGE=1 git merge --ff-only FETCH_HEAD
     else
-        git checkout FETCH_HEAD
+        GIT_LFS_SKIP_SMUDGE=1 git checkout FETCH_HEAD
     fi
 }
 export -f _sync_submodule
