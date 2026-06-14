@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# All overridable via env
+SRC_HOST="${SRC_HOST:-github.com}"
+SRC_USER="${SRC_USER:-x-access-token}"
+SRC_PROJECT_ORGNAME="${SRC_PROJECT_ORGNAME:-${PROJECT_ORGNAME}}"
+SRC_PROJECT_REPONAME="${SRC_PROJECT_REPONAME:-${PROJECT_REPONAME}}"
+
+DST_HOST="${DST_HOST:-gitlab.com}"
+DST_USER="${DST_USER:-oauth2}"
+# Destination org/repo default to the source names.
+DST_PROJECT_ORGNAME="${DST_PROJECT_ORGNAME:-${SRC_PROJECT_ORGNAME}}"
+DST_PROJECT_REPONAME="${DST_PROJECT_REPONAME:-${SRC_PROJECT_REPONAME}}"
+
+SRC_PATH="${SRC_PROJECT_ORGNAME}/${SRC_PROJECT_REPONAME}"
+DST_PATH="${DST_PROJECT_ORGNAME}/${DST_PROJECT_REPONAME}"
+
+# Space-separated list of branches to sync (all tags are always synced).
+SYNC_BRANCHES="${SYNC_BRANCHES:-main}"
+
+: "${GITLAB_TOKEN:?GITLAB_TOKEN not set}"
+
+if [ -n "${GITHUB_TOKEN:-}" ]; then
+  src_url="https://${SRC_USER}:${GITHUB_TOKEN}@${SRC_HOST}/${SRC_PATH}.git"
+else
+  src_url="https://${SRC_HOST}/${SRC_PATH}.git"
+fi
+dst_url="https://${DST_USER}:${GITLAB_TOKEN}@${DST_HOST}/${DST_PATH}.git"
+
+# Bare clone of the source; brings all branches and tags as objects/refs locally.
+git clone --mirror "$src_url" repo.git
+
+# Build the list of refspecs to sync: each requested branch (that exists on the
+# source) plus all tags. Missing branches are warned about but not fatal.
+refspecs=()
+for br in $SYNC_BRANCHES; do
+  if git -C repo.git rev-parse --quiet --verify "refs/heads/${br}" >/dev/null; then
+    refspecs+=("refs/heads/${br}:refs/heads/${br}")
+  else
+    echo "WARNING: branch '${br}' not found on source, skipping" >&2
+  fi
+done
+refspecs+=("refs/tags/*:refs/tags/*")
+
+# Fetch the destination's copies of these refs so we can detect divergence
+# before pushing. We compare only the refs we actually sync.
+git -C repo.git fetch "$dst_url" \
+  "+refs/heads/*:refs/dst/heads/*" "+refs/tags/*:refs/dst/tags/*"
+
+diverged=0
+
+check_ff() {
+  # Abort if the destination ref has commits not contained in the source ref,
+  # i.e. pushing would require a non-fast-forward force-overwrite.
+  local name="$1" src_ref="$2" dst_ref="$3"
+  local dst_sha
+  dst_sha="$(git -C repo.git rev-parse --quiet --verify "$dst_ref" || true)"
+  [ -z "$dst_sha" ] && return 0  # not on destination yet; nothing to clobber
+
+  local src_sha
+  src_sha="$(git -C repo.git rev-parse --quiet --verify "$src_ref" || true)"
+  if [ "$dst_sha" = "$src_sha" ]; then
+    return 0  # already in sync
+  fi
+  if ! git -C repo.git merge-base --is-ancestor "$dst_sha" "$src_sha"; then
+    echo "DIVERGED: ${name} on destination has commits not in source (would be overwritten)" >&2
+    diverged=1
+  fi
+}
+
+for br in $SYNC_BRANCHES; do
+  git -C repo.git rev-parse --quiet --verify "refs/heads/${br}" >/dev/null || continue
+  check_ff "branch ${br}" "refs/heads/${br}" "refs/dst/heads/${br}"
+done
+
+while read -r tag; do
+  check_ff "tag ${tag}" "refs/tags/${tag}" "refs/dst/tags/${tag}"
+done < <(git -C repo.git for-each-ref --format='%(refname:strip=2)' refs/tags)
+
+if [ "$diverged" -ne 0 ]; then
+  echo "Aborting: destination has diverged from source. Refusing to overwrite." >&2
+  exit 1
+fi
+
+# Non-force push: git itself also rejects any non-fast-forward update or
+# clobbered tag, so this is safe even if the destination changed mid-run.
+git -C repo.git push "$dst_url" "${refspecs[@]}"
