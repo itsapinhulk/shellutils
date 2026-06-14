@@ -1,0 +1,30 @@
+name: Mirror to GitLab
+
+on:
+  # Run a few times a day (UTC). Adjust the cron list to taste.
+  schedule:
+    - cron: "0 */4 * * *"
+  # Allow manual runs from the Actions tab.
+  workflow_dispatch:
+
+# Avoid overlapping syncs if a run is slow.
+concurrency:
+  group: gitlab-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    environment: main
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Sync branches and tags to GitLab
+        env:
+          # Source = this repo. Destination org/repo default to these,
+          # so GitLab gets the same path.
+          PROJECT_ORGNAME: ${{ github.repository_owner }}
+          PROJECT_REPONAME: ${{ github.event.repository.name }}
+          GITHUB_TOKEN: ${{ github.token }}
+          GITLAB_TOKEN: ${{ secrets.GITLAB_TOKEN }}
+        run: bash bash/github-to-gitlab-sync
