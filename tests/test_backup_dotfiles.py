@@ -6,6 +6,7 @@ import importlib.util
 import os
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -18,6 +19,14 @@ encode_path = backup_dotfiles.encode_path
 backup = backup_dotfiles.backup
 
 BASH_SCRIPT = Path(__file__).parent.parent / "bash" / "backup-dotfiles"
+
+
+def _fake_crontab(monkeypatch, stdout="", stderr="", returncode=0):
+    """Replace subprocess.run in the module so no real crontab is invoked."""
+    def fake_run(cmd, *args, **kwargs):
+        assert cmd == ["crontab", "-l"]
+        return SimpleNamespace(stdout=stdout, stderr=stderr, returncode=returncode)
+    monkeypatch.setattr(backup_dotfiles.subprocess, "run", fake_run)
 
 
 # --- encode_path ---
@@ -225,6 +234,66 @@ class TestBackupRootPaths:
         assert (target / "_root_" / encode_path(src.relative_to("/"))).read_text() == "secret"
 
 
+# --- backup: crontab ---
+
+class TestBackupCrontab:
+    def test_dry_run_prints_without_writing(self, tmp_path, monkeypatch, capsys):
+        _fake_crontab(monkeypatch, stdout="* * * * * echo hi\n")
+        target = tmp_path / "backup"
+        backup([], str(target), crontab=True)
+
+        assert not (target / "crontab.txt").exists()
+        assert "crontab" in capsys.readouterr().out
+
+    def test_save_writes_crontab(self, tmp_path, monkeypatch):
+        _fake_crontab(monkeypatch, stdout="* * * * * echo hi\n")
+        target = tmp_path / "backup"
+        backup([], str(target), save=True, crontab=True)
+
+        assert (target / "crontab.txt").read_text() == "* * * * * echo hi\n"
+
+    def test_crontab_alongside_sources(self, tmp_path, monkeypatch):
+        _fake_crontab(monkeypatch, stdout="0 0 * * * backup\n")
+        home = tmp_path / "home"
+        src = home / ".bashrc"
+        src.parent.mkdir(parents=True)
+        src.write_text("# bash")
+        monkeypatch.setenv("HOME", str(home))
+
+        target = tmp_path / "backup"
+        backup([str(src)], str(target), save=True, crontab=True)
+
+        assert (target / "_tilde_" / "_dot_bashrc").read_text() == "# bash"
+        assert (target / "crontab.txt").read_text() == "0 0 * * * backup\n"
+
+    def test_no_crontab_warns_and_skips(self, tmp_path, monkeypatch, capsys):
+        _fake_crontab(monkeypatch, stderr="no crontab for user", returncode=1)
+        target = tmp_path / "backup"
+        backup([], str(target), save=True, crontab=True)
+
+        assert not (target / "crontab.txt").exists()
+        assert "Warning" in capsys.readouterr().err
+
+    def test_missing_crontab_binary_warns(self, tmp_path, monkeypatch, capsys):
+        def raise_fnf(*args, **kwargs):
+            raise FileNotFoundError("crontab")
+        monkeypatch.setattr(backup_dotfiles.subprocess, "run", raise_fnf)
+
+        target = tmp_path / "backup"
+        backup([], str(target), save=True, crontab=True)
+
+        assert not (target / "crontab.txt").exists()
+        assert "not found" in capsys.readouterr().err
+
+    def test_empty_crontab_written(self, tmp_path, monkeypatch):
+        # Some crontab implementations exit 0 with empty output.
+        _fake_crontab(monkeypatch, stdout="", returncode=0)
+        target = tmp_path / "backup"
+        backup([], str(target), save=True, crontab=True)
+
+        assert (target / "crontab.txt").read_text() == ""
+
+
 # --- bash wrapper ---
 
 def _run_bash(args: list[str], env: dict | None = None) -> subprocess.CompletedProcess:
@@ -343,6 +412,38 @@ class TestBashWrapper:
 
         assert result.returncode == 0
         assert (target / "_root_" / src.relative_to("/")).read_text() == "127.0.0.1 localhost"
+
+    def test_crontab_env_var_adds_flag(self, tmp_path):
+        # Dry run so the real `crontab` binary is not invoked.
+        target = tmp_path / "backup"
+        result = _run_bash(["-s", str(tmp_path / ".nope"), "-t", str(target)], env={
+            "HOME": str(tmp_path),
+            "BACKUP_DOTFILES_CRONTAB": "1",
+        })
+
+        assert result.returncode == 0
+        assert "crontab -l" in result.stdout
+
+    def test_crontab_env_var_falsey_ignored(self, tmp_path):
+        target = tmp_path / "backup"
+        result = _run_bash(["-s", str(tmp_path / ".nope"), "-t", str(target)], env={
+            "HOME": str(tmp_path),
+            "BACKUP_DOTFILES_CRONTAB": "0",
+        })
+
+        assert result.returncode == 0
+        assert "crontab -l" not in result.stdout
+
+    def test_crontab_only_via_env(self, tmp_path):
+        # No sources supplied; --crontab alone satisfies the requirement.
+        target = tmp_path / "backup"
+        result = _run_bash(["-t", str(target)], env={
+            "HOME": str(tmp_path),
+            "BACKUP_DOTFILES_CRONTAB": "yes",
+        })
+
+        assert result.returncode == 0
+        assert "crontab -l" in result.stdout
 
     def test_missing_sources_and_target_exits_nonzero(self, tmp_path):
         result = _run_bash([], env={

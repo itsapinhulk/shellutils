@@ -7,6 +7,7 @@
 # Environment variables:
 #   BACKUP_DOTFILES_SOURCES   Colon-separated list of paths to back up (required)
 #   BACKUP_DOTFILES_TARGET    Destination directory (required)
+#   BACKUP_DOTFILES_CRONTAB   Set to 1/true/yes/on to also save `crontab -l`
 #
 # Any additional arguments passed to this script are forwarded verbatim,
 # allowing env-var defaults to be overridden on the command line.
@@ -18,10 +19,12 @@
 #   ~/.bashrc       ->  <target>/_tilde_/_dot_bashrc
 #   ~/.config/nvim  ->  <target>/_tilde_/_dot_config/nvim
 #   /etc/hosts      ->  <target>/_root_/etc/hosts
+#   crontab -l      ->  <target>/crontab.txt
 #
 # Examples:
 #   BACKUP_DOTFILES_SOURCES="~/.bashrc:~/.config/nvim:/etc/hosts" BACKUP_DOTFILES_TARGET=/mnt/backup backup-dotfiles
 #   BACKUP_DOTFILES_TARGET=/mnt/backup backup-dotfiles -s ~/.ssh ~/.zshrc /etc/fstab --save
+#   BACKUP_DOTFILES_TARGET=/mnt/backup BACKUP_DOTFILES_CRONTAB=1 backup-dotfiles --save
 
 set -euo pipefail
 
@@ -41,6 +44,13 @@ fi
 # Build --target from env if set and not already supplied via CLI.
 if [[ -n "${BACKUP_DOTFILES_TARGET:-}" ]] && [[ "$*" != *"--target"* ]] && [[ "$*" != *" -t "* ]]; then
     args+=(--target "$BACKUP_DOTFILES_TARGET")
+fi
+
+# Append --crontab from env if set to a truthy value and not already on the CLI.
+if [[ -n "${BACKUP_DOTFILES_CRONTAB:-}" ]] && [[ "$*" != *"--crontab"* ]]; then
+    case "${BACKUP_DOTFILES_CRONTAB,,}" in
+        1|true|yes|on) args+=(--crontab) ;;
+    esac
 fi
 
 exec python3 "$PY_SCRIPT" "${args[@]}" "$@"
