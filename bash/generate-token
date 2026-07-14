@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# Generate a random token of the given length (default 32) and type (default hex).
+
+set -euo pipefail
+
+usage() {
+    cat <<EOF
+Usage: $(basename "$0") [-t TYPE] [length]
+
+  -t TYPE   character set to draw from (default: hex)
+              hex           0-9 a-f
+              numeric       0-9
+              alpha         A-Z a-z
+              alpha-numeric  A-Z a-z 0-9
+              all-caps       A-Z
+              all-lower      a-z
+  length    number of characters to generate (positive integer, default: 32)
+EOF
+}
+
+type="hex"
+while getopts ":t:h" opt; do
+    case "$opt" in
+        t) type="$OPTARG" ;;
+        h) usage; exit 0 ;;
+        *) usage >&2; exit 1 ;;
+    esac
+done
+shift $((OPTIND - 1))
+
+length="${1:-32}"
+
+if ! [[ "$length" =~ ^[0-9]+$ ]] || [[ "$length" -lt 1 ]]; then
+    echo "error: length must be a positive integer" >&2
+    usage >&2
+    exit 1
+fi
+
+case "$type" in
+    hex)          charset='0-9a-f' ;;
+    numeric)      charset='0-9' ;;
+    alpha)        charset='A-Za-z' ;;
+    alpha-numeric) charset='A-Za-z0-9' ;;
+    all-caps)      charset='A-Z' ;;
+    all-lower)     charset='a-z' ;;
+    *)
+        echo "error: unknown type '$type'" >&2
+        usage >&2
+        exit 1
+        ;;
+esac
+
+token=""
+while [[ "${#token}" -lt "$length" ]]; do
+    token+=$(head -c 256 /dev/urandom | LC_ALL=C tr -dc "$charset")
+done
+echo "${token:0:length}"
