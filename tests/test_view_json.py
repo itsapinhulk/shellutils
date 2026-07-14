@@ -11,6 +11,7 @@ view_json = __import__("view-json")
 parse_filter = view_json.parse_filter
 get_nested_value = view_json.get_nested_value
 convert_timestamp = view_json.convert_timestamp
+parse_date_value = view_json.parse_date_value
 matches_filter = view_json.matches_filter
 load_records = view_json.load_records
 extract_fields = view_json.extract_fields
@@ -104,6 +105,33 @@ class TestConvertTimestamp:
         assert result == "None"
 
 
+# --- parse_date_value ---
+
+class TestParseDateValue:
+    def test_date_only(self):
+        assert isinstance(parse_date_value("2026-06-15"), float)
+
+    def test_datetime_with_seconds(self):
+        assert isinstance(parse_date_value("2026-06-15 10:30:00"), float)
+
+    def test_datetime_with_minutes(self):
+        assert isinstance(parse_date_value("2026-06-15 10:30"), float)
+
+    def test_slash_format(self):
+        assert isinstance(parse_date_value("2026/06/15"), float)
+
+    def test_ordering(self):
+        assert parse_date_value("2026-06-15") < parse_date_value("2026-06-16")
+
+    def test_invalid_returns_none(self):
+        assert parse_date_value("not-a-date") is None
+        assert parse_date_value("2026-13-99") is None
+
+    def test_roundtrips_with_convert_timestamp(self):
+        # Interpreted in local time both ways, so the date is preserved.
+        assert convert_timestamp(parse_date_value("2026-06-15"), "%Y-%m-%d") == "2026-06-15"
+
+
 # --- matches_filter ---
 
 class TestMatchesFilter:
@@ -152,6 +180,29 @@ class TestMatchesFilter:
     def test_equals_no_wildcard_is_exact(self):
         # No glob metachars => exact match, not substring
         assert not matches_filter({"name": "Johnny"}, "name", "=", "John")
+
+    def test_timestamp_field_date_gte(self):
+        boundary = parse_date_value("2026-06-15")
+        ts_fields = {"ts"}
+        assert matches_filter({"ts": boundary + 10}, "ts", ">=", "2026-06-15", ts_fields)
+        assert matches_filter({"ts": boundary}, "ts", ">=", "2026-06-15", ts_fields)
+        assert not matches_filter({"ts": boundary - 10}, "ts", ">=", "2026-06-15", ts_fields)
+
+    def test_timestamp_field_date_lt(self):
+        boundary = parse_date_value("2026-06-15")
+        ts_fields = {"ts"}
+        assert matches_filter({"ts": boundary - 10}, "ts", "<", "2026-06-15", ts_fields)
+        assert not matches_filter({"ts": boundary + 10}, "ts", "<", "2026-06-15", ts_fields)
+
+    def test_timestamp_field_numeric_fallback(self):
+        # A non-date filter value still compares numerically.
+        assert matches_filter({"ts": 1755000000}, "ts", ">=", "1700000000", {"ts"})
+        assert not matches_filter({"ts": 1650000000}, "ts", ">=", "1700000000", {"ts"})
+
+    def test_date_filter_ignored_without_timestamp_declaration(self):
+        # Field not declared as a timestamp => numeric filter path unchanged.
+        boundary = parse_date_value("2026-06-15")
+        assert matches_filter({"ts": boundary + 10}, "ts", ">=", str(boundary))
 
 
 # --- load_records ---
@@ -303,6 +354,29 @@ class TestMultiFileAndLabel:
         out = capsys.readouterr().out
         assert f"# {f1}" in out
         assert f"# {f2}" in out
+
+
+# --- date filtering end-to-end ---
+
+class TestDateFilterIntegration:
+    def test_main_filters_timestamp_by_date(self, tmp_path, capsys):
+        boundary = parse_date_value("2026-06-15")
+        records = [
+            {"id": 1, "ts": int(boundary - 86400)},
+            {"id": 2, "ts": int(boundary + 86400)},
+        ]
+        f = tmp_path / "data.jsonl"
+        f.write_text("\n".join(json.dumps(r) for r in records))
+        import sys
+        argv_backup = sys.argv
+        try:
+            sys.argv = ["view-json", str(f), "-f", "id", "-t", "ts",
+                        "-l", "ts >= 2026-06-15"]
+            main()
+        finally:
+            sys.argv = argv_backup
+        lines = [l for l in capsys.readouterr().out.splitlines() if l.strip()]
+        assert [json.loads(l)["id"] for l in lines] == [2]
 
 
 # --- bash wrapper ---

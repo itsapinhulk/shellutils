@@ -44,19 +44,46 @@ def convert_timestamp(value: float, fmt: str = "%Y-%m-%d %H:%M:%S") -> str:
         return str(value)
 
 
-def matches_filter(record: dict, field: str, op: str, value: str) -> bool:
+def parse_date_value(value: str) -> float | None:
+    """Parse a date/time string into a local-time Unix timestamp, or None.
+
+    Mirrors convert_timestamp's local-time interpretation so that a date
+    written in the filter compares against the raw stored timestamp.
+    """
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d", "%Y/%m/%d"):
+        try:
+            return datetime.datetime.strptime(value, fmt).timestamp()
+        except ValueError:
+            continue
+    return None
+
+
+def matches_filter(record: dict, field: str, op: str, value: str,
+                   timestamp_fields: set[str] = frozenset()) -> bool:
     """Check if a record matches a filter condition."""
     actual = get_nested_value(record, field)
     if actual is None:
         return False
 
-    try:
-        if isinstance(actual, (int, float)):
-            value = float(value)
-        elif isinstance(actual, bool):
-            value = value.lower() in ('true', '1', 'yes')
-    except ValueError:
-        pass
+    if (field in timestamp_fields) and isinstance(actual, (int, float)):
+        # Compare against a date string by converting it to a timestamp;
+        # fall back to a plain numeric comparison if it isn't a date.
+        parsed = parse_date_value(value)
+        if parsed is not None:
+            value = parsed
+        else:
+            try:
+                value = float(value)
+            except ValueError:
+                pass
+    else:
+        try:
+            if isinstance(actual, (int, float)):
+                value = float(value)
+            elif isinstance(actual, bool):
+                value = value.lower() in ('true', '1', 'yes')
+        except ValueError:
+            pass
 
     if op == '=':
         if isinstance(value, str) and any(c in value for c in '*?['):
@@ -188,7 +215,7 @@ Examples:
         # Filter records
         filtered = []
         for record in records:
-            if all(matches_filter(record, f, op, v) for f, op, v in parsed_filters):
+            if all(matches_filter(record, f, op, v, timestamp_fields) for f, op, v in parsed_filters):
                 filtered.append(record)
 
         # Sort records
