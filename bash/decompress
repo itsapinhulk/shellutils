@@ -23,6 +23,16 @@ function decompress() {
       mkdir "${_dir_name}"
       tar -xvzf "${_full_file_path}" -C "${_dir_name}"
     )
+  elif [[ ${_file_name} =~ .+\.gz$ ]]; then
+    local _out_name=$(echo "${_file_name}" | sed 's/\.gz$//')
+    if [[ -e "${_out_name}" ]]; then
+      echo "Refusing to overwrite existing '${_out_name}'"
+      return 1
+    fi
+    (
+      set -x;
+      gunzip -c "${_full_file_path}" > "${_out_name}"
+    ) || { rm -f "${_out_name}"; return 1; }
   elif [[ ${_file_name} =~ .*\.tar\.bz2$ ]]; then
     local _dir_name=$(echo "${_file_name}" | sed 's/\.tar\.bz2$//')
     (
