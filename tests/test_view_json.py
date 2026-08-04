@@ -1,5 +1,6 @@
 """Tests for py/view-json.py and bash/view-json."""
 
+import csv
 import json
 import subprocess
 from pathlib import Path
@@ -377,6 +378,70 @@ class TestDateFilterIntegration:
             sys.argv = argv_backup
         lines = [l for l in capsys.readouterr().out.splitlines() if l.strip()]
         assert [json.loads(l)["id"] for l in lines] == [2]
+
+
+# --- csv output ---
+
+class TestCsvOutput:
+    @staticmethod
+    def run_csv(args, capsys):
+        import sys
+        argv_backup = sys.argv
+        try:
+            sys.argv = ["view-json"] + args
+            main()
+        finally:
+            sys.argv = argv_backup
+        out = capsys.readouterr().out
+        lines = [l for l in out.splitlines() if l.strip()]
+        return lines, list(csv.reader(lines))
+
+    @staticmethod
+    def two_files(tmp_path):
+        f1 = tmp_path / "a.json"
+        f2 = tmp_path / "b.json"
+        f1.write_text(json.dumps([{"id": 1}]))
+        f2.write_text(json.dumps([{"id": 2}]))
+        return f1, f2
+
+    def test_file_column_flag_adds_column(self, tmp_path, capsys):
+        f1, f2 = self.two_files(tmp_path)
+        lines, rows = self.run_csv([str(f1), str(f2), "-f", "id", "-o", "csv",
+                                    "--file-column"], capsys)
+        assert rows == [["file", "id"], [str(f1), "1"], [str(f2), "2"]]
+        # A label line would not parse as csv.
+        assert not any(l.startswith("#") for l in lines)
+
+    def test_no_file_column_by_default(self, tmp_path, capsys):
+        f1, f2 = self.two_files(tmp_path)
+        lines, rows = self.run_csv([str(f1), str(f2), "-f", "id", "-o", "csv"], capsys)
+        assert rows == [["id"], ["1"], ["2"]]
+        assert not any(l.startswith("#") for l in lines)
+
+    def test_single_header_for_all_files(self, tmp_path, capsys):
+        f1, f2 = self.two_files(tmp_path)
+        _, rows = self.run_csv([str(f1), str(f2), "-f", "id", "-o", "csv",
+                                "--file-column"], capsys)
+        assert [r for r in rows if r[-1] == "id"] == [["file", "id"]]
+
+    def test_file_column_for_single_file(self, tmp_path, capsys):
+        f = tmp_path / "a.json"
+        f.write_text(json.dumps([{"id": 1}]))
+        _, rows = self.run_csv([str(f), "-f", "id", "-o", "csv", "--file-column"], capsys)
+        assert rows == [["file", "id"], [str(f), "1"]]
+
+    def test_no_header_keeps_file_column(self, tmp_path, capsys):
+        f1, f2 = self.two_files(tmp_path)
+        _, rows = self.run_csv([str(f1), str(f2), "-f", "id", "-o", "csv",
+                                "--file-column", "--no-header"], capsys)
+        assert rows == [[str(f1), "1"], [str(f2), "2"]]
+
+    def test_file_column_requires_csv(self, tmp_path, capsys):
+        f = tmp_path / "a.json"
+        f.write_text(json.dumps([{"id": 1}]))
+        with pytest.raises(SystemExit) as exc:
+            self.run_csv([str(f), "-f", "id", "--file-column"], capsys)
+        assert exc.value.code == 2
 
 
 # --- bash wrapper ---

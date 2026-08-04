@@ -193,14 +193,25 @@ Examples:
                         help='Omit the file name label printed before each file\'s output')
     parser.add_argument('--with-file-label', action='store_true',
                         help='Always show the file name label, even for a single file')
+    parser.add_argument('--file-column', action='store_true',
+                        help='Include the source file as the first column of csv output')
 
     args = parser.parse_args()
 
     timestamp_fields = set(args.timestamp_fields) if args.timestamp_fields else set()
     parsed_filters = [parse_filter(f) for f in args.filters] if args.filters else []
 
+    if args.file_column and (args.output != 'csv'):
+        parser.error('--file-column requires -o csv')
+
+    label_file = (len(args.files) > 1 or args.with_file_label) and not args.no_file_label
+    csv_writer = None
+    csv_fields = None
+
     for filepath in args.files:
-        if (len(args.files) > 1 or args.with_file_label) and not args.no_file_label:
+        # In csv output the file is a column instead of a label line, which
+        # would not parse as csv.
+        if label_file and args.output != 'csv':
             print(f"# {filepath}")
 
         try:
@@ -249,11 +260,16 @@ Examples:
                 print(json.dumps(r, default=str))
         elif args.output == 'csv':
             import csv
-            writer = csv.writer(sys.stdout)
-            if not args.no_header and field_list:
-                writer.writerow(field_list)
-            for r in results:
-                writer.writerow([r.get(f, '') for f in field_list])
+            if (csv_writer is None) and field_list:
+                # One header for all files, so the output stays a single table.
+                csv_writer = csv.writer(sys.stdout)
+                csv_fields = field_list
+                if not args.no_header:
+                    csv_writer.writerow((['file'] if args.file_column else []) + csv_fields)
+            if csv_writer is not None:
+                for r in results:
+                    values = [r.get(f, '') for f in csv_fields]
+                    csv_writer.writerow(([filepath] + values) if args.file_column else values)
         else:  # table
             if not results:
                 print("No matching records found.")
