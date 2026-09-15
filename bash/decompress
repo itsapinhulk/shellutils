@@ -33,6 +33,23 @@ function decompress() {
       set -x;
       gunzip -c "${_full_file_path}" > "${_out_name}"
     ) || { rm -f "${_out_name}"; return 1; }
+  elif [[ ${_file_name} =~ .*\.tar\.xz$ ]]; then
+    local _dir_name=$(echo "${_file_name}" | sed 's/\.tar\.xz$//')
+    (
+      set -x;
+      mkdir "${_dir_name}"
+      tar -xvJf "${_full_file_path}" -C "${_dir_name}"
+    )
+  elif [[ ${_file_name} =~ .+\.xz$ ]]; then
+    local _out_name=$(echo "${_file_name}" | sed 's/\.xz$//')
+    if [[ -e "${_out_name}" ]]; then
+      echo "Refusing to overwrite existing '${_out_name}'"
+      return 1
+    fi
+    (
+      set -x;
+      xz -dc "${_full_file_path}" > "${_out_name}"
+    ) || { rm -f "${_out_name}"; return 1; }
   elif [[ ${_file_name} =~ .*\.tar\.bz2$ ]]; then
     local _dir_name=$(echo "${_file_name}" | sed 's/\.tar\.bz2$//')
     (
