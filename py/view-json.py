@@ -15,6 +15,13 @@ import datetime
 from typing import Any
 
 
+def split_comma_args(values: list[str] | None) -> list[str] | None:
+    """Split comma separated args, so that '-f a, b,c -f d' gives ['a', 'b', 'c', 'd']."""
+    if values is None:
+        return None
+    return [part.strip() for value in values for part in value.split(',') if part.strip()]
+
+
 def parse_filter(filter_str: str) -> tuple[str, str, str]:
     """Parse a filter string like 'field=value' or 'field!=value'."""
     for op in ['!=', '>=', '<=', '~=', '>', '<', '=']:
@@ -164,6 +171,7 @@ def main():
         epilog="""
 Examples:
   %(prog)s data.json -f name email status
+  %(prog)s data.json -f name,email -f status
   %(prog)s logs.jsonl -f user.name timestamp -t timestamp
   %(prog)s data.json -f id name -F status=active -F age>=18
   %(prog)s events.json -f event_type created_at -t created_at --date-format "%%Y-%%m-%%d"
@@ -172,16 +180,20 @@ Examples:
         """
     )
     parser.add_argument('files', nargs='+', help='Input JSON or JSONL file(s)')
-    parser.add_argument('-f', '--fields', nargs='+', required=False, default=None,
-                        help='Fields to extract (supports dot notation for nested fields). If omitted, shows all fields.')
-    parser.add_argument('-t', '--timestamp-fields', nargs='*', default=None,
-                        help='Fields to convert from Unix timestamp to date')
-    parser.add_argument('-s', '--sort', nargs='*', default=None,
-                        help='Fields to sort by (applied successively)')
+    parser.add_argument('-f', '--fields', nargs='+', action='extend', default=None,
+                        help='Fields to extract (supports dot notation for nested fields), space or comma separated; '
+                             'repeated flags add to the list. If omitted, shows all fields.')
+    parser.add_argument('-t', '--timestamp-fields', nargs='+', action='extend', default=None,
+                        help='Fields to convert from Unix timestamp to date, space or comma separated; '
+                             'repeated flags add to the list')
+    parser.add_argument('-s', '--sort', nargs='+', action='extend', default=None,
+                        help='Fields to sort by (applied successively), space or comma separated; '
+                             'repeated flags add to the list')
     parser.add_argument('-r', '--reverse', action='store_true',
                         help='Reverse sort order (descending)')
-    parser.add_argument('-l', '--filter', action='append', dest='filters', default=None,
-                        help='Filter records (e.g., status=active, name=a*b, name~=john, age>=18). '
+    parser.add_argument('-l', '--filter', nargs='+', action='extend', dest='filters', default=None,
+                        help='Filter records (e.g., status=active, name=a*b, name~=john, age>=18), space separated; '
+                             'repeated flags add to the list. Commas are part of the filter value. '
                              '= and != support bash-style wildcards (*, ?, [..]). If omitted, shows all records.')
     parser.add_argument('--date-format', default='%Y-%m-%d %H:%M:%S',
                         help='Output format for timestamps (default: %%Y-%%m-%%d %%H:%%M:%%S)')
@@ -197,6 +209,9 @@ Examples:
                         help='Include the source file as the first column of csv output')
 
     args = parser.parse_args()
+    args.fields = split_comma_args(args.fields)
+    args.timestamp_fields = split_comma_args(args.timestamp_fields)
+    args.sort = split_comma_args(args.sort)
 
     timestamp_fields = set(args.timestamp_fields) if args.timestamp_fields else set()
     parsed_filters = [parse_filter(f) for f in args.filters] if args.filters else []
