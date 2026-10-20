@@ -16,9 +16,29 @@ parse_date_value = view_json.parse_date_value
 matches_filter = view_json.matches_filter
 load_records = view_json.load_records
 extract_fields = view_json.extract_fields
+split_comma_args = view_json.split_comma_args
 main = view_json.main
 
 BASH_SCRIPT = Path(__file__).parent.parent / "bash" / "view-json"
+
+
+# --- split_comma_args ---
+
+class TestSplitCommaArgs:
+    def test_none(self):
+        assert split_comma_args(None) is None
+
+    def test_space_separated(self):
+        assert split_comma_args(["a", "b"]) == ["a", "b"]
+
+    def test_comma_separated(self):
+        assert split_comma_args(["a,b,c"]) == ["a", "b", "c"]
+
+    def test_comma_then_space(self):
+        assert split_comma_args(["a,", "b"]) == ["a", "b"]
+
+    def test_mixed(self):
+        assert split_comma_args(["a, b", "c,d", "e"]) == ["a", "b", "c", "d", "e"]
 
 
 # --- parse_filter ---
@@ -378,6 +398,61 @@ class TestDateFilterIntegration:
             sys.argv = argv_backup
         lines = [l for l in capsys.readouterr().out.splitlines() if l.strip()]
         assert [json.loads(l)["id"] for l in lines] == [2]
+
+
+# --- list options ---
+
+class TestListOptions:
+    RECORDS = [
+        {"id": 1, "kind": "x", "rank": 3, "name": "p,q"},
+        {"id": 2, "kind": "y", "rank": 1, "name": "r"},
+        {"id": 3, "kind": "x", "rank": 2, "name": "s"},
+        {"id": 4, "kind": "y", "rank": 2, "name": "t"},
+    ]
+
+    @classmethod
+    def run_main(cls, tmp_path, capsys, args):
+        import sys
+        f = tmp_path / "data.json"
+        f.write_text(json.dumps(cls.RECORDS))
+        argv_backup = sys.argv
+        try:
+            sys.argv = ["view-json", str(f)] + args
+            main()
+        finally:
+            sys.argv = argv_backup
+        return [json.loads(l) for l in capsys.readouterr().out.splitlines() if l.strip()]
+
+    @pytest.mark.parametrize("args", [
+        ["-f", "id", "kind", "rank"],
+        ["-f", "id,kind,rank"],
+        ["-f", "id,", "kind,", "rank"],
+        ["-f", "id", "-f", "kind,rank"],
+    ])
+    def test_fields_forms_equivalent(self, tmp_path, capsys, args):
+        out = self.run_main(tmp_path, capsys, args)
+        assert [list(r) for r in out] == [["id", "kind", "rank"]] * len(self.RECORDS)
+
+    @pytest.mark.parametrize("args", [
+        ["-s", "kind", "rank"],
+        ["-s", "kind,rank"],
+        ["-s", "kind", "-s", "rank"],
+    ])
+    def test_sort_forms_equivalent(self, tmp_path, capsys, args):
+        out = self.run_main(tmp_path, capsys, ["-f", "id"] + args)
+        assert [r["id"] for r in out] == [3, 1, 2, 4]
+
+    @pytest.mark.parametrize("args", [
+        ["-l", "kind=y", "rank>=2"],
+        ["-l", "kind=y", "-l", "rank>=2"],
+    ])
+    def test_filter_forms_equivalent(self, tmp_path, capsys, args):
+        out = self.run_main(tmp_path, capsys, ["-f", "id"] + args)
+        assert [r["id"] for r in out] == [4]
+
+    def test_filter_keeps_comma_in_value(self, tmp_path, capsys):
+        out = self.run_main(tmp_path, capsys, ["-f", "id", "-l", "name=p,q"])
+        assert [r["id"] for r in out] == [1]
 
 
 # --- csv output ---
