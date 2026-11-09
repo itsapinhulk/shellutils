@@ -1,10 +1,61 @@
 #!/usr/bin/env bash
 
+usage() {
+    echo "Usage: $(basename "$0") [-H] [-t COLS] [FILE]" >&2
+    echo "  -H       first line is a header and is not converted" >&2
+    echo "  -t COLS  comma separated 1-based indices of columns holding epoch seconds, shown as local time" >&2
+    exit 1
+}
+
+hasHeader=0
+timeCols=""
+while getopts "Ht:" opt; do
+    case "$opt" in
+        H) hasHeader=1 ;;
+        t) timeCols="$OPTARG" ;;
+        *) usage ;;
+    esac
+done
+shift $((OPTIND - 1))
+
+if [[ -n "$timeCols" ]] && ! [[ "$timeCols" =~ ^[1-9][0-9]*(,[1-9][0-9]*)*$ ]]; then
+    echo "Invalid column list: '$timeCols'" >&2
+    exit 1
+fi
+
 # Read CSV from argument (file) or stdin
 if [[ -n "$1" ]] && [[ -f "$1" ]]; then
     input=$(cat "$1")
 else
     input=$(cat)
+fi
+
+if [[ -n "$timeCols" ]]; then
+    IFS=, read -ra cols <<< "$timeCols"
+    input=$(
+        lineNum=0
+        while IFS= read -r line; do
+            lineNum=$((lineNum + 1))
+            if ((hasHeader)) && ((lineNum == 1)); then
+                echo "$line"
+                continue
+            fi
+            # The appended comma keeps a trailing empty field, which read would otherwise drop
+            IFS=, read -ra fields <<< "$line,"
+            for c in "${cols[@]}"; do
+                i=$((c - 1))
+                value="${fields[i]}"
+                if ! [[ "$value" =~ ^[0-9]+(\.[0-9]*)?$ ]]; then
+                    echo "Line $lineNum column $c is not an epoch timestamp: '$value'" >&2
+                    exit 1
+                fi
+                printf -v "fields[i]" '%(%Y-%m-%d %H:%M:%S)T' "${value%%.*}"
+            done
+            printf -v line '%s,' "${fields[@]}"
+            line="${line%,}"
+            echo "$line"
+        done <<< "$input"
+    ) || exit 1
 fi
 
 # Convert CSV to table using column command
